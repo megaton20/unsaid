@@ -35,7 +35,6 @@
             transform: translateX(100%);
             opacity: 0;
         }
-
         to {
             transform: translateX(0);
             opacity: 1;
@@ -88,6 +87,24 @@
         border-radius: 20px;
         margin-left: 10px;
         animation: pulse 2s infinite;
+        min-width: 20px;
+        text-align: center;
+    }
+
+    .unread-badge.dot {
+        padding: 4px 8px;
+        min-width: 10px;
+        border-radius: 50%;
+        font-size: 0;
+    }
+
+    .unread-badge.dot::after {
+        content: '';
+        display: block;
+        width: 8px;
+        height: 8px;
+        background: white;
+        border-radius: 50%;
     }
 
     .inbox-stats {
@@ -187,6 +204,7 @@
         transition: all 0.3s ease;
         position: relative;
         background: rgba(0, 0, 0, 0.1);
+        text-decoration: none;
     }
 
     .conversation-item:hover {
@@ -200,6 +218,15 @@
 
     .conversation-item.unread {
         background: rgba(229, 57, 53, 0.05);
+    }
+
+    .conversation-item.read {
+        background: rgba(0, 0, 0, 0.1);
+    }
+
+    .conversation-item.typing {
+        background: rgba(76, 175, 80, 0.05);
+        border-left: 3px solid #4CAF50;
     }
 
     /* Conversation Avatar */
@@ -219,6 +246,21 @@
         justify-content: center;
         border: 2px solid rgba(229, 57, 53, 0.3);
         box-shadow: 0 4px 15px rgba(229, 57, 53, 0.15);
+        transition: all 0.3s ease;
+    }
+
+    .conversation-item.typing .avatar-circle {
+        border-color: #4CAF50;
+        animation: typingPulse 1s infinite;
+    }
+
+    @keyframes typingPulse {
+        0%, 100% {
+            box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
+        }
+        50% {
+            box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+        }
     }
 
     .avatar-text {
@@ -244,6 +286,53 @@
         animation: pulse 1.5s infinite;
     }
 
+    /* Dot indicator for single unread message */
+    .unread-indicator.dot {
+        padding: 5px;
+        min-width: 10px;
+        border-radius: 50%;
+        font-size: 0;
+        width: 10px;
+        height: 10px;
+    }
+
+    .unread-indicator.dot::after {
+        content: '';
+        display: block;
+        width: 6px;
+        height: 6px;
+        background: white;
+        border-radius: 50%;
+    }
+
+    .read-indicator {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background: #4CAF50;
+        color: white;
+        font-size: 0.7rem;
+        font-weight: 700;
+        padding: 4px 8px;
+        border-radius: 20px;
+        min-width: 20px;
+        text-align: center;
+        box-shadow: 0 2px 10px rgba(76, 175, 80, 0.3);
+    }
+
+    .typing-indicator-small {
+        position: absolute;
+        bottom: -2px;
+        right: -2px;
+        background: #4CAF50;
+        color: white;
+        font-size: 0.6rem;
+        padding: 2px 8px;
+        border-radius: 10px;
+        white-space: nowrap;
+        animation: typingPulse 1s infinite;
+    }
+
     /* Conversation Content */
     .conversation-content {
         flex: 1;
@@ -265,6 +354,13 @@
         display: flex;
         align-items: center;
         gap: 8px;
+    }
+
+    .conversation-name .typing-status {
+        color: #4CAF50;
+        font-size: 0.75rem;
+        font-weight: 400;
+        animation: typingPulse 1s infinite;
     }
 
     .conversation-username {
@@ -294,106 +390,19 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         margin-right: 15px;
+        transition: color 0.3s ease;
     }
 
-    .message-count {
-        font-size: 0.75rem;
-        color: var(--accent-red);
-        background: rgba(229, 57, 53, 0.1);
-        padding: 3px 10px;
-        border-radius: 12px;
-        font-weight: 600;
-        white-space: nowrap;
-    }
-
-
-
-    .open-chat-btn {
-        background: rgba(229, 57, 53, 0.2);
-        color: var(--text-light);
-        border: 1px solid rgba(229, 57, 53, 0.3);
-        width: 45px;
-        height: 45px;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-decoration: none;
-        transition: all 0.3s ease;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-    }
-
-    .open-chat-btn:hover {
-        background: rgba(229, 57, 53, 0.35);
-        transform: translateY(-2px);
-        box-shadow: 0 4px 15px rgba(229, 57, 53, 0.2);
-    }
-
-    .btn-icon {
-        font-size: 1.2rem;
-    }
-
-    /* No Conversations State */
-    .no-conversations {
-        padding: 60px 20px;
-        text-align: center;
-    }
-
-    .empty-state {
-        max-width: 400px;
-        margin: 0 auto;
-    }
-
-    .empty-icon {
-        font-size: 4rem;
-        margin-bottom: 20px;
-        opacity: 0.5;
-        color: var(--text-muted);
-    }
-
-    .empty-title {
-        font-size: 1.5rem;
-        color: var(--text-light);
-        margin-bottom: 10px;
-        font-family: 'Montserrat', sans-serif;
-        font-weight: 600;
-    }
-
-    .empty-message {
-        color: var(--text-muted);
-        font-size: 1rem;
-        line-height: 1.5;
-    }
-
-    /* Scrollbar Styling */
-    .conversations-list::-webkit-scrollbar {
-        width: 6px;
-    }
-
-    .conversations-list::-webkit-scrollbar-track {
-        background: rgba(0, 0, 0, 0.1);
-        border-radius: 10px;
-    }
-
-    .conversations-list::-webkit-scrollbar-thumb {
-        background: rgba(229, 57, 53, 0.3);
-        border-radius: 10px;
-    }
-
-    .conversations-list::-webkit-scrollbar-thumb:hover {
-        background: rgba(229, 57, 53, 0.5);
+    .conversation-item.typing .conversation-message {
+        color: #4CAF50;
     }
 
     /* Animations */
     @keyframes pulse {
-
-        0%,
-        100% {
+        0%, 100% {
             opacity: 0.7;
             transform: scale(1);
         }
-
         50% {
             opacity: 1;
             transform: scale(1.05);
@@ -441,16 +450,10 @@
         .conversation-message {
             font-size: 0.85rem;
         }
-
-        .open-chat-btn {
-            width: 40px;
-            height: 40px;
-        }
     }
 </style>
 
 <script src="/socket.io/socket.io.js"></script>
-
 
 <!-- Inbox Container -->
 <section class="container inbox-container">
@@ -466,16 +469,6 @@
                 </span>
                 <span class="stat-label">Conversations</span>
             </div>
-            <div class="stat-item">
-                <span id="total-messages" class="stat-number">
-                    <%= totalMessages %>
-                </span>
-                <span class="stat-label">Total Messages</span>
-            </div>
-            <div class="stat-item">
-                <span id="online-admins" class="stat-number">1</span>
-                <span class="stat-label">Online</span>
-            </div>
         </div>
     </div>
 
@@ -489,27 +482,36 @@
     <div class="conversations-list" id="conversations-list">
         <% if (conversations && conversations.length> 0) { %>
             <% conversations.forEach(function(conversation) { %>
-                <a href="/chat/admin/user/<%= conversation.user_id %>" class="conversation-link">
-                    <div class="conversation-item <%= conversation.unread_count > 0 ? 'unread' : '' %>"
+                <a href="/chat/admin/user/<%= conversation.user_id %>" class="conversation-link" data-user-id="<%= conversation.user_id %>">
+                    <div class="conversation-item <%= conversation.unread_count > 0 ? 'unread' : 'read' %>"
                         data-user-id="<%= conversation.user_id %>"
-                        data-conversation-id="conv-<%= conversation.user_id %>">
+                        data-conversation-id="conv-<%= conversation.user_id %>"
+                        data-unread-count="<%= conversation.unread_count || 0 %>">
                         <div class="conversation-avatar">
                             <div class="avatar-circle">
                                 <span class="avatar-text">
                                     <%= conversation.username?.charAt(0).toUpperCase() || 'A' %>
                                 </span>
                             </div>
-                            <% if (conversation.unread_count> 0) { %>
-                                <span class="unread-indicator">
-                                    <%= conversation.unread_count %>
+                            <% if (conversation.unread_count > 0) { %>
+                                <span class="unread-indicator <%= conversation.unread_count === 1 ? 'dot' : '' %>">
+                                    <%= conversation.unread_count === 1 ? '' : conversation.unread_count %>
                                 </span>
-                                <% } %>
+                            <% } else { %>
+                                <span class="read-indicator">✓</span>
+                            <% } %>
                         </div>
 
                         <div class="conversation-content">
                             <div class="conversation-header">
                                 <h3 class="conversation-name">
                                     <%= conversation.username || 'Anonymous User' %>
+                                    <span class="conversation-username">
+                                        <% if (conversation.is_online) { %>
+                                            <span style="color: #4CAF50;">●</span>
+                                        <% } %>
+                                    </span>
+                                    <span class="typing-status" style="display: none;">typing...</span>
                                 </h3>
                                 <span class="conversation-time" data-time="<%= conversation.last_message_at %>">
                                     <%= formatTime(conversation.last_message_at) %>
@@ -522,24 +524,24 @@
                                         <%= conversation.last_message.length> 50 ?
                                             conversation.last_message.substring(0, 50) + '...' :
                                             conversation.last_message %>
-                                            <% } else { %>
-                                                No messages yet
-                                                <% } %>
+                                    <% } else { %>
+                                        No messages yet
+                                    <% } %>
                                 </p>
                             </div>
                         </div>
                     </div>
                 </a>
-                <% }); %>
-                    <% } else { %>
-                        <div class="no-conversations">
-                            <div class="empty-state">
-                                <div class="empty-icon">📭</div>
-                                <h3 class="empty-title">No conversations yet</h3>
-                                <p class="empty-message">When users send you messages, they'll appear here.</p>
-                            </div>
-                        </div>
-                        <% } %>
+            <% }); %>
+        <% } else { %>
+            <div class="no-conversations">
+                <div class="empty-state">
+                    <div class="empty-icon">📭</div>
+                    <h3 class="empty-title">No conversations yet</h3>
+                    <p class="empty-message">When users send you messages, they'll appear here.</p>
+                </div>
+            </div>
+        <% } %>
     </div>
 </section>
 
@@ -557,45 +559,130 @@ document.addEventListener('DOMContentLoaded', function () {
     const searchInput = document.getElementById('search-conversations');
     const unreadBadge = document.getElementById('unread-badge');
     const conversationCountElement = document.getElementById('conversation-count');
-    const totalMessagesElement = document.getElementById('total-messages');
-    const onlineAdminsElement = document.getElementById('online-admins');
+
+    // Get current active user from URL (if any)
+    const currentPath = window.location.pathname;
+    const activeUserId = currentPath.includes('/user/') ? 
+        currentPath.split('/user/')[1] : null;
 
     let conversationsMap = new Map();
     let currentSearchTerm = '';
+    let typingTimeoutMap = new Map();
 
-    // Initialize conversations map
+    // Initialize conversations map with accurate unread counts
     document.querySelectorAll('.conversation-item').forEach(item => {
         const userId = item.dataset.userId;
-        const timeElement = item.querySelector('.conversation-time');
-        if (timeElement && timeElement.dataset.time) {
-            conversationsMap.set(userId, {
-                element: item,
-                lastUpdated: new Date(timeElement.dataset.time).getTime()
-            });
-        }
+        const unreadCount = parseInt(item.dataset.unreadCount) || 0;
+        
+        conversationsMap.set(userId, {
+            element: item,
+            unreadCount: unreadCount,
+            isTyping: false,
+            originalMessage: item.querySelector('.conversation-message')?.textContent || ''
+        });
     });
 
-    // Socket.IO event handlers for admin
-    socket.on('connect', () => {
-        console.log('✅ Socket.IO connected successfully');
+    // Update total unread badge with dot for single message
+    function updateUnreadBadge() {
+        let totalUnread = 0;
         
-        // Request conversations list
+        conversationsMap.forEach((conv, userId) => {
+            // Don't count unread for active user
+            if (String(userId) !== String(activeUserId)) {
+                totalUnread += conv.unreadCount || 0;
+            }
+        });
+        
+        if (totalUnread > 0) {
+            unreadBadge.textContent = totalUnread;
+            unreadBadge.style.display = 'inline-block';
+            // Add dot class for single message
+            if (totalUnread === 1) {
+                unreadBadge.className = 'unread-badge dot';
+            } else {
+                unreadBadge.className = 'unread-badge';
+            }
+        } else {
+            unreadBadge.style.display = 'none';
+        }
+        
+        // Also update the individual conversation items
+        conversationsMap.forEach((conv, userId) => {
+            updateConversationUnreadDisplay(userId);
+        });
+    }
+
+    // Update individual conversation unread display with dot for single message
+    function updateConversationUnreadDisplay(userId) {
+        const conv = conversationsMap.get(userId);
+        if (!conv) return;
+        
+        const item = conv.element;
+        const avatarContainer = item.querySelector('.conversation-avatar');
+        const isActive = String(userId) === String(activeUserId);
+        const unreadCount = isActive ? 0 : conv.unreadCount || 0;
+        
+        // Remove existing indicators
+        const existingUnread = avatarContainer.querySelector('.unread-indicator');
+        const existingRead = avatarContainer.querySelector('.read-indicator');
+        if (existingUnread) existingUnread.remove();
+        if (existingRead) existingRead.remove();
+        
+        if (unreadCount > 0) {
+            item.classList.add('unread');
+            item.classList.remove('read');
+            
+            const indicator = document.createElement('span');
+            indicator.className = 'unread-indicator';
+            // Add dot class for single message
+            if (unreadCount === 1) {
+                indicator.className += ' dot';
+                indicator.textContent = '';
+            } else {
+                indicator.textContent = unreadCount;
+            }
+            avatarContainer.appendChild(indicator);
+            
+            // Update data attribute
+            item.dataset.unreadCount = unreadCount;
+        } else {
+            item.classList.remove('unread');
+            item.classList.add('read');
+            
+            const indicator = document.createElement('span');
+            indicator.className = 'read-indicator';
+            indicator.textContent = '✓';
+            avatarContainer.appendChild(indicator);
+            
+            // Update data attribute
+            item.dataset.unreadCount = 0;
+        }
+    }
+
+    // Socket.IO event handlers
+    socket.on('connect', () => {
+        console.log('✅ Admin connected to inbox');
+        
+        // If we have an active user, mark their messages as read
+        if (activeUserId) {
+            markConversationAsRead(activeUserId);
+        }
+        
+        // Request initial conversations
         socket.emit('admin-get-conversations');
     });
 
     socket.on('connect_error', (error) => {
-        console.error('❌ Socket.IO connection error:', error);
+        console.error('Socket.IO connection error:', error);
         showNotification('Connection lost. Reconnecting...', 'error');
     });
 
     socket.on('disconnect', (reason) => {
-        console.log('🔌 Socket.IO disconnected:', reason);
+        console.log('Socket.IO disconnected:', reason);
     });
 
     socket.on('connected', (data) => {
-        console.log('✅ Socket authenticated:', data);
-        
-        // If admin, request conversations
+        console.log('Socket authenticated:', data);
         if (data.role === 'admin') {
             socket.emit('admin-get-conversations');
         }
@@ -610,19 +697,33 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Listen for new messages from users
     socket.on('new-user-message', (messageData) => {
-        console.log('📨 New message received:', messageData);
-
-        // Update or create conversation
-        updateConversationFromMessage(messageData);
-
-        // Show notification
-        showNewMessageNotification(messageData);
-
-        // Play notification sound
-        playNotificationSound();
-
-        // Update unread badge
+        console.log('📨 New user message:', messageData);
+        
+        const isActiveUser = String(messageData.user_id) === String(activeUserId);
+        
+        // Update conversation with accurate unread count
+        updateConversationFromMessage(messageData, isActiveUser);
+        
+        // Show notification only if not active user
+        if (!isActiveUser) {
+            showNewMessageNotification(messageData);
+            playNotificationSound();
+        }
+        
+        // Update badge
         updateUnreadBadge();
+    });
+
+    // Listen for typing events - REAL TIME
+    socket.on('typing', (data) => {
+        console.log('⌨️ Typing event:', data);
+        if (data.userId && data.isTyping) {
+            // User started typing
+            showUserTyping(data.userId, data.username);
+        } else if (data.userId) {
+            // User stopped typing
+            hideUserTyping(data.userId);
+        }
     });
 
     // Listen for conversation updates
@@ -631,37 +732,138 @@ document.addEventListener('DOMContentLoaded', function () {
         updateConversationFromData(conversationData);
     });
 
-    // Listen for user typing
-    socket.on('typing', (data) => {
-        if (data.userId && data.isTyping) {
-            console.log('⌨️ User typing:', data.username);
+    // Mark conversation as read
+    function markConversationAsRead(userId) {
+        console.log('📖 Marking conversation as read for user:', userId);
+        
+        const conv = conversationsMap.get(userId);
+        if (!conv) return;
+
+        // Update the unread count
+        conv.unreadCount = 0;
+        conversationsMap.set(userId, conv);
+        
+        // Update UI
+        updateConversationUnreadDisplay(userId);
+        updateUnreadBadge();
+
+        // Emit to server that messages were read
+        socket.emit('mark-conversation-read', { userId });
+    }
+
+    // Show user typing indicator - REAL TIME
+    function showUserTyping(userId, username) {
+        const conv = conversationsMap.get(userId);
+        if (!conv) return;
+        
+        const item = conv.element;
+        
+        // Clear any existing timeout (user is actively typing)
+        if (typingTimeoutMap.has(userId)) {
+            clearTimeout(typingTimeoutMap.get(userId));
+            typingTimeoutMap.delete(userId);
         }
-    });
+        
+        // Add typing class
+        item.classList.add('typing');
+        
+        // Show typing status in name
+        const nameElement = item.querySelector('.conversation-name');
+        let typingStatus = nameElement.querySelector('.typing-status');
+        if (!typingStatus) {
+            typingStatus = document.createElement('span');
+            typingStatus.className = 'typing-status';
+            nameElement.appendChild(typingStatus);
+        }
+        typingStatus.style.display = 'inline';
+        typingStatus.textContent = 'typing...';
+        
+        // Update message preview to show typing
+        const messageElement = item.querySelector('.conversation-message');
+        // Store original message if not already stored
+        if (!messageElement.dataset.originalText) {
+            messageElement.dataset.originalText = messageElement.textContent;
+        }
+        messageElement.textContent = '✏️ typing...';
+        messageElement.style.color = '#4CAF50';
+        
+        // Add typing indicator to avatar
+        const avatarContainer = item.querySelector('.conversation-avatar');
+        let typingIndicator = avatarContainer.querySelector('.typing-indicator-small');
+        if (!typingIndicator) {
+            typingIndicator = document.createElement('span');
+            typingIndicator.className = 'typing-indicator-small';
+            typingIndicator.textContent = 'typing...';
+            avatarContainer.appendChild(typingIndicator);
+        }
+        
+        conv.isTyping = true;
+        conversationsMap.set(userId, conv);
+    }
+
+    // Hide user typing indicator - REAL TIME
+    function hideUserTyping(userId) {
+        const conv = conversationsMap.get(userId);
+        if (!conv) return;
+        
+        const item = conv.element;
+        
+        // Remove typing class
+        item.classList.remove('typing');
+        
+        // Hide typing status in name
+        const nameElement = item.querySelector('.conversation-name');
+        const typingStatus = nameElement.querySelector('.typing-status');
+        if (typingStatus) {
+            typingStatus.style.display = 'none';
+            typingStatus.textContent = '';
+        }
+        
+        // Restore message preview
+        const messageElement = item.querySelector('.conversation-message');
+        if (messageElement.dataset.originalText) {
+            messageElement.textContent = messageElement.dataset.originalText;
+            messageElement.style.color = '';
+            delete messageElement.dataset.originalText;
+        }
+        
+        // Remove typing indicator from avatar
+        const avatarContainer = item.querySelector('.conversation-avatar');
+        const typingIndicator = avatarContainer.querySelector('.typing-indicator-small');
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
+        
+        conv.isTyping = false;
+        conversationsMap.set(userId, conv);
+        
+        // Clear timeout if exists
+        if (typingTimeoutMap.has(userId)) {
+            clearTimeout(typingTimeoutMap.get(userId));
+            typingTimeoutMap.delete(userId);
+        }
+    }
 
     // Update conversations list
     function updateConversationsList(conversations) {
         console.log('Updating conversations list with:', conversations.length, 'conversations');
         
-        // Remove "no conversations" message if it exists
         const noConversations = document.querySelector('.no-conversations');
         if (noConversations && conversations.length > 0) {
             noConversations.remove();
         }
 
-        // Clear existing conversations
         conversationsList.innerHTML = '';
         conversationsMap.clear();
 
-        // Add new conversations
         conversations.forEach(conversation => {
             addConversationToDOM(conversation);
         });
 
-        // Update stats
         conversationCountElement.textContent = conversations.length;
         updateUnreadBadge();
         
-        console.log('Conversations list updated successfully');
+        console.log('✅ Conversations list updated successfully');
     }
 
     // Add conversation to DOM
@@ -669,27 +871,38 @@ document.addEventListener('DOMContentLoaded', function () {
         const conversationLink = document.createElement('a');
         conversationLink.href = `/chat/admin/user/${conversation.user_id}`;
         conversationLink.className = 'conversation-link';
+        conversationLink.dataset.userId = conversation.user_id;
 
         const isUnread = conversation.unread_count > 0;
         const lastMessage = conversation.last_message || 'No messages yet';
         const preview = lastMessage.length > 50 ?
             lastMessage.substring(0, 50) + '...' : lastMessage;
+        const isActive = String(conversation.user_id) === String(activeUserId);
+        const displayUnread = isActive ? 0 : conversation.unread_count;
 
         conversationLink.innerHTML = `
-            <div class="conversation-item ${isUnread ? 'unread' : ''}" 
+            <div class="conversation-item ${displayUnread > 0 ? 'unread' : 'read'}" 
                  data-user-id="${conversation.user_id}"
-                 data-conversation-id="conv-${conversation.user_id}">
+                 data-conversation-id="conv-${conversation.user_id}"
+                 data-unread-count="${displayUnread}">
                 <div class="conversation-avatar">
                     <div class="avatar-circle">
                         <span class="avatar-text">${(conversation.username || 'A').charAt(0).toUpperCase()}</span>
                     </div>
-                    ${isUnread ? `<span class="unread-indicator">${conversation.unread_count}</span>` : ''}
+                    ${displayUnread > 0 ? 
+                        `<span class="unread-indicator ${displayUnread === 1 ? 'dot' : ''}">${displayUnread === 1 ? '' : displayUnread}</span>` : 
+                        `<span class="read-indicator">✓</span>`
+                    }
                 </div>
                 
                 <div class="conversation-content">
                     <div class="conversation-header">
                         <h3 class="conversation-name">
                             ${escapeHtml(conversation.username || 'Anonymous User')}
+                            <span class="conversation-username">
+                                ${conversation.is_online ? '<span style="color: #4CAF50;">●</span>' : ''}
+                            </span>
+                            <span class="typing-status" style="display: none;">typing...</span>
                         </h3>
                         <span class="conversation-time" data-time="${conversation.last_message_at || new Date().toISOString()}">
                             ${formatRelativeTime(new Date(conversation.last_message_at || new Date()))}
@@ -708,18 +921,24 @@ document.addEventListener('DOMContentLoaded', function () {
         // Add to map
         conversationsMap.set(conversation.user_id, {
             element: conversationLink.querySelector('.conversation-item'),
-            lastUpdated: new Date(conversation.last_message_at || new Date()).getTime()
+            unreadCount: displayUnread,
+            isTyping: false,
+            originalMessage: preview
         });
+
+        // If this is the active user, mark as read
+        if (isActive) {
+            markConversationAsRead(conversation.user_id);
+        }
     }
 
     // Update conversation from incoming message
-    function updateConversationFromMessage(messageData) {
+    function updateConversationFromMessage(messageData, isActiveUser) {
         const { user_id, username, content, created_at, is_from_admin } = messageData;
 
         const existing = conversationsMap.get(user_id);
 
         if (existing) {
-            // Update existing conversation
             const item = existing.element;
 
             // Update message preview
@@ -735,19 +954,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
             // Update unread count
             if (!is_from_admin) {
-                item.classList.add('unread');
-                const unreadIndicator = item.querySelector('.unread-indicator');
-                if (unreadIndicator) {
-                    const currentCount = parseInt(unreadIndicator.textContent) || 0;
-                    unreadIndicator.textContent = currentCount + 1;
+                if (isActiveUser) {
+                    // Active user - mark as read
+                    existing.unreadCount = 0;
                 } else {
-                    const avatarContainer = item.querySelector('.conversation-avatar');
-                    const indicator = document.createElement('span');
-                    indicator.className = 'unread-indicator';
-                    indicator.textContent = '1';
-                    avatarContainer.appendChild(indicator);
+                    // Increment unread count
+                    existing.unreadCount = (existing.unreadCount || 0) + 1;
                 }
             }
+            
+            // Update UI
+            updateConversationUnreadDisplay(user_id);
+            conversationsMap.set(user_id, existing);
 
             // Move to top
             moveConversationToTop(item);
@@ -758,17 +976,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 username: username || 'Anonymous User',
                 last_message: content,
                 last_message_at: created_at,
-                unread_count: is_from_admin ? 0 : 1
+                unread_count: is_from_admin || isActiveUser ? 0 : 1
             };
 
             addConversationToDOM(conversationData);
-
-            // Update conversation count
             conversationCountElement.textContent = parseInt(conversationCountElement.textContent) + 1;
         }
 
-        // Update total messages
-        totalMessagesElement.textContent = parseInt(totalMessagesElement.textContent) + 1;
+        // Update badge
+        updateUnreadBadge();
     }
 
     // Update conversation from conversation data
@@ -783,7 +999,14 @@ document.addEventListener('DOMContentLoaded', function () {
             // Update username
             const nameElement = item.querySelector('.conversation-name');
             if (username) {
-                nameElement.textContent = username;
+                const currentText = nameElement.textContent;
+                const usernameSpan = nameElement.querySelector('.conversation-username');
+                const typingStatus = nameElement.querySelector('.typing-status');
+                if (usernameSpan) {
+                    nameElement.innerHTML = `${escapeHtml(username)} ${usernameSpan.outerHTML} ${typingStatus ? typingStatus.outerHTML : ''}`;
+                } else {
+                    nameElement.textContent = username;
+                }
             }
 
             // Update message preview
@@ -802,31 +1025,22 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             // Update unread count
-            if (unread_count > 0) {
-                item.classList.add('unread');
-                const unreadIndicator = item.querySelector('.unread-indicator');
-                if (unreadIndicator) {
-                    unreadIndicator.textContent = unread_count;
-                } else {
-                    const avatarContainer = item.querySelector('.conversation-avatar');
-                    const indicator = document.createElement('span');
-                    indicator.className = 'unread-indicator';
-                    indicator.textContent = unread_count;
-                    avatarContainer.appendChild(indicator);
-                }
-            } else {
-                item.classList.remove('unread');
-                const unreadIndicator = item.querySelector('.unread-indicator');
-                if (unreadIndicator) {
-                    unreadIndicator.remove();
-                }
-            }
+            const isActive = String(user_id) === String(activeUserId);
+            existing.unreadCount = isActive ? 0 : (unread_count || 0);
+            conversationsMap.set(user_id, existing);
+            
+            // Update UI
+            updateConversationUnreadDisplay(user_id);
 
             // Move to top
             moveConversationToTop(item);
         } else {
-            // Create new conversation if it doesn't exist
-            addConversationToDOM(conversationData);
+            // Create new conversation
+            const isActive = String(user_id) === String(activeUserId);
+            addConversationToDOM({
+                ...conversationData,
+                unread_count: isActive ? 0 : (unread_count || 0)
+            });
             conversationCountElement.textContent = parseInt(conversationCountElement.textContent) + 1;
         }
         
@@ -841,33 +1055,12 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    // Update unread badge
-    function updateUnreadBadge() {
-        let totalUnread = 0;
-        
-        document.querySelectorAll('.conversation-item').forEach(item => {
-            const unreadIndicator = item.querySelector('.unread-indicator');
-            if (unreadIndicator) {
-                totalUnread += parseInt(unreadIndicator.textContent) || 0;
-            }
-        });
-        
-        if (totalUnread > 0) {
-            unreadBadge.textContent = totalUnread;
-            unreadBadge.style.display = 'inline-block';
-        } else {
-            unreadBadge.style.display = 'none';
-        }
-    }
-
     // Show notification for new message
     function showNewMessageNotification(messageData) {
-        // Don't show notification if admin sent the message
         if (messageData.is_from_admin) return;
+        if (String(messageData.user_id) === String(activeUserId)) return;
         
-        // Check if page is visible
         if (document.hidden) {
-            // Show browser notification if allowed
             if ('Notification' in window && Notification.permission === 'granted') {
                 new Notification(`New message from ${messageData.username || 'Anonymous'}`, {
                     body: messageData.content.length > 50 ? 
@@ -877,7 +1070,6 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
         
-        // Show in-app notification
         const notification = document.createElement('div');
         notification.className = 'new-message-notification';
         notification.innerHTML = `
@@ -897,14 +1089,12 @@ document.addEventListener('DOMContentLoaded', function () {
         
         document.body.appendChild(notification);
         
-        // Auto-remove after 5 seconds
         setTimeout(() => {
             if (notification.parentNode) {
                 notification.remove();
             }
         }, 5000);
         
-        // Close button
         notification.querySelector('.notification-close').addEventListener('click', () => {
             notification.remove();
         });
@@ -913,7 +1103,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Play notification sound
     function playNotificationSound() {
         try {
-            const audio = new Audio('/notification.mp3');
+            const audio = new Audio('/audio/notification.wav');
             audio.volume = 0.3;
             audio.play().catch(e => console.log('Audio play failed:', e));
         } catch (e) {
@@ -971,7 +1161,6 @@ document.addEventListener('DOMContentLoaded', function () {
         filterConversations(currentSearchTerm);
     });
 
-    // Filter conversations
     function filterConversations(searchTerm) {
         document.querySelectorAll('.conversation-link').forEach(link => {
             const conversationItem = link.querySelector('.conversation-item');
@@ -991,8 +1180,9 @@ document.addEventListener('DOMContentLoaded', function () {
         Notification.requestPermission();
     }
 
-    // Debug: Log connection status
-    console.log('🚀 Admin inbox initialized');
+    // Debug
+    console.log(' Admin inbox initialized');
+    console.log('Active user ID:', activeUserId);
     console.log('Socket.IO URL:', window.location.origin);
 });
 
@@ -1145,6 +1335,128 @@ style.textContent = `
         font-size: 1.2rem;
         cursor: pointer;
         margin-left: auto;
+    }
+
+    .read-indicator {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background: #4CAF50;
+        color: white;
+        font-size: 0.7rem;
+        font-weight: 700;
+        padding: 4px 8px;
+        border-radius: 20px;
+        min-width: 20px;
+        text-align: center;
+        box-shadow: 0 2px 10px rgba(76, 175, 80, 0.3);
+    }
+
+    .unread-indicator {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background: var(--accent-red);
+        color: white;
+        font-size: 0.7rem;
+        font-weight: 700;
+        padding: 4px 8px;
+        border-radius: 20px;
+        min-width: 20px;
+        text-align: center;
+        box-shadow: 0 2px 10px rgba(229, 57, 53, 0.4);
+        animation: pulse 1.5s infinite;
+    }
+
+    /* Dot indicator for single unread message */
+    .unread-indicator.dot {
+        padding: 5px;
+        min-width: 10px;
+        border-radius: 50%;
+        font-size: 0;
+        width: 10px;
+        height: 10px;
+    }
+
+    .unread-indicator.dot::after {
+        content: '';
+        display: block;
+        width: 6px;
+        height: 6px;
+        background: white;
+        border-radius: 50%;
+    }
+
+    .unread-badge.dot {
+        padding: 4px 8px;
+        min-width: 10px;
+        border-radius: 50%;
+        font-size: 0;
+    }
+
+    .unread-badge.dot::after {
+        content: '';
+        display: block;
+        width: 8px;
+        height: 8px;
+        background: white;
+        border-radius: 50%;
+    }
+
+    .typing-indicator-small {
+        position: absolute;
+        bottom: -2px;
+        right: -2px;
+        background: #4CAF50;
+        color: white;
+        font-size: 0.6rem;
+        padding: 2px 8px;
+        border-radius: 10px;
+        white-space: nowrap;
+        animation: typingPulse 1s infinite;
+    }
+
+    @keyframes typingPulse {
+        0%, 100% {
+            opacity: 0.7;
+            transform: scale(1);
+        }
+        50% {
+            opacity: 1;
+            transform: scale(1.05);
+        }
+    }
+
+    @keyframes pulse {
+        0%, 100% {
+            opacity: 0.7;
+            transform: scale(1);
+        }
+        50% {
+            opacity: 1;
+            transform: scale(1.05);
+        }
+    }
+
+    .conversation-item.typing {
+        background: rgba(76, 175, 80, 0.05);
+        border-left: 3px solid #4CAF50;
+    }
+
+    .conversation-item.typing .avatar-circle {
+        border-color: #4CAF50;
+        animation: typingPulse 1s infinite;
+    }
+
+    .conversation-name .typing-status {
+        color: #4CAF50;
+        font-size: 0.75rem;
+        font-weight: 400;
+        animation: typingPulse 1s infinite;
+    }
+
+    .conversation-item.typing .conversation-message {
+        color: #4CAF50;
     }
 `;
 document.head.appendChild(style);

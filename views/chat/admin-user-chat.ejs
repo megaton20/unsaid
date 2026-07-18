@@ -28,18 +28,31 @@
 
 <!-- Socket.IO client -->
 <script src="/socket.io/socket.io.js"></script>
+
 <!-- Chat Area -->
 <section class="container chat-container">
     <div class="messages-container" id="messages-container">
         <% if (messages && messages.length > 0) { %>
             <% messages.forEach(function(message) { 
                 const isAdmin = message.is_from_admin;  
+                const isDeleted = message.is_deleted || false;
+                const isRead = message.is_read || false;
+                const contentLength = message.content ? message.content.length : 0;
+                const vanishSeconds = Math.min(300, Math.max(60, 60 + Math.floor(contentLength / 3)));
             %>
-                <div class="message-wrapper <%= isAdmin ? 'message-right' : 'message-left' %>" 
+                <% if (!isDeleted) { %>
+                <div class="message-wrapper <%= isAdmin ? 'message-right' : 'message-left' %> 
+                           <%= isRead ? 'message-read' : '' %>" 
                      data-message-id="<%= message.id %>" 
-                     data-user-id="<%= message.user_id %>">
+                     data-user-id="<%= message.user_id %>"
+                     data-timestamp="<%= new Date(message.created_at).getTime() %>"
+                     data-is-read="<%= isRead %>"
+                     data-read-at="<%= message.read_at || '' %>"
+                     data-from-admin="<%= isAdmin %>"
+                     data-vanish-seconds="<%= vanishSeconds %>"
+                     data-should-vanish="<%= isRead && message.read_at && (new Date() - new Date(message.read_at) > (vanishSeconds * 1000)) %>">
+                    
                     <% if (!isAdmin) { %>
-                        <!-- User message (left side) -->
                         <div class="message-avatar-left">
                             <div class="avatar-circle-small">
                                 <span class="avatar-text-small"><%= targetUser?.username?.charAt(0).toUpperCase() || 'U' %></span>
@@ -51,21 +64,30 @@
                         <div class="message-meta">
                             <span class="message-username"><%= message.username || (isAdmin ? 'You' : targetUser?.username || 'User') %></span>
                             <span class="message-time"><%= new Date(message.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) %></span>
+                            <% if (!isAdmin && !isRead) { %>
+                                <span class="message-status-pending">●</span>
+                            <% } %>
                         </div>
                         <div class="message-bubble <%= isAdmin ? 'admin-bubble' : 'user-bubble' %>">
                             <div class="message-text">
                                 <%= message.content %>
                             </div>
-                            <% if (message.is_read && !isAdmin) { %>
-                                <div class="message-status">
-                                    <span class="read-status">✓ Read</span>
-                                </div>
+                            <% if (isRead && !isAdmin) { %>
+                                <div class="message-status read-status"></div>
                             <% } %>
+                            <div class="message-vanish-timer">
+                                <span class="vanish-indicator">
+                                    <% if (isRead) { %>
+                                        Vanish in <span class="vanish-countdown"><%= vanishSeconds %></span>s
+                                    <% } else { %>
+                                        Waiting to be read
+                                    <% } %>
+                                </span>
+                            </div>
                         </div>
                     </div>
                     
                     <% if (isAdmin) { %>
-                        <!-- Admin message (right side) -->
                         <div class="message-avatar-right">
                             <div class="avatar-circle-small admin-avatar">
                                 <span class="avatar-text-small">A</span>
@@ -73,11 +95,11 @@
                         </div>
                     <% } %>
                 </div>
+                <% } %>
             <% }); %>
             
-            <!-- Typing indicator container (placed after last message) -->
             <div id="typing-indicator-container">
-                <div id="typing-indicator" class="typing-indicator">
+                <div id="typing-indicator" class="typing-indicator" style="display: none;">
                     <div class="typing-dots">
                         <span></span>
                         <span></span>
@@ -98,7 +120,6 @@
         <% } %>
     </div>
 
-    <!-- Admin Reply Form -->
     <div class="message-input-area">
         <form class="message-form" id="message-form">
             <div class="message-input-container">
@@ -116,7 +137,7 @@
                     <span id="char-count">0</span>/500
                 </div>
                 <div class="message-hint">
-                    Press <kbd>Enter</kbd> to send
+                    Press <kbd>Enter</kbd> to send • Messages vanish after being read (longer = longer stay)
                 </div>
             </div>
         </form>
@@ -124,8 +145,9 @@
 </section>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize Socket.IO
+(function() {
+    'use strict';
+
     const socket = io({
         withCredentials: true,
         reconnection: true,
@@ -138,29 +160,26 @@ document.addEventListener('DOMContentLoaded', function() {
     const messageInput = document.getElementById('message-input');
     const sendButton = document.getElementById('send-button');
     const messageCountElement = document.getElementById('message-count');
-    const typingIndicator = document.getElementById('typing-indicator');
-    const typingIndicatorContainer = document.getElementById('typing-indicator-container');
     const onlineStatusElement = document.getElementById('online-status');
+
+    let typingIndicator = document.getElementById('typing-indicator');
+    let typingIndicatorContainer = document.getElementById('typing-indicator-container');
     
-    // Get current user info
     const currentUserId = '<%= user.id || "admin" %>';
-    const currentUsername = '<%= user.username || "Admin" %>';
     const targetUserId = '<%= targetUser?.id %>';
     const targetUsername = '<%= targetUser?.username || "User" %>';
     const targetUserInitial = '<%= targetUser?.username?.charAt(0).toUpperCase() || "U" %>';
     
-    // Typing management
-    let typingTimeout;
+    let typingTimeout = null;
     let isTyping = false;
     let lastTypingTime = 0;
-    const TYPING_DEBOUNCE = 500; // ms
-    const TYPING_STOP_DELAY = 2000; // ms
+    const TYPING_DEBOUNCE = 300;
+    const TYPING_STOP_DELAY = 4000;
+    
+    const BASE_VANISH_SECONDS = 60;
+    const EXTRA_TIME_PER_CHAR = 0.5;
+    const MAX_VANISH_SECONDS = 300;
 
-    // Polling variables
-    let pollingInterval;
-    let lastPollingUpdate = new Date().toISOString();
-
-    // Scroll anchor
     let scrollAnchor = document.getElementById('scroll-anchor');
     if (!scrollAnchor) {
         scrollAnchor = document.createElement('div');
@@ -168,241 +187,745 @@ document.addEventListener('DOMContentLoaded', function() {
         messagesContainer.appendChild(scrollAnchor);
     }
 
-    // Socket.IO event handlers
-    socket.on('connect', () => {
+    const vanishQueue = {};
+
+    // ===== ADMIN AUDIO SYSTEM - Custom Sound with Fallback =====
+    let adminAudioContext = null;
+    let adminVanishBuffer = null;
+    let adminSendBuffer = null;
+    let adminReceiveBuffer = null;
+    let adminCustomSoundLoaded = false;
+
+    function initAdminAudio() {
+        try {
+            adminAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+            console.log('Admin audio context created');
+            loadAllAdminSounds();
+            return true;
+        } catch (e) {
+            console.log('⚠️ Web Audio API not supported');
+            return false;
+        }
+    }
+
+    async function loadAllAdminSounds() {
+        await loadAdminSound('vanish');
+        await loadAdminSound('send');
+        await loadAdminSound('receive');
+    }
+
+    async function loadAdminSound(type) {
+        const soundPaths = {
+            'vanish': [
+                '/audio/vanish.mp3', '/audio/vanish.wav',
+                '/audio/notification.mp3', '/audio/notification.wav',
+                '/vanish.mp3', '/vanish.wav',
+                '/sounds/vanish.mp3', '/sounds/vanish.wav'
+            ],
+            'send': [
+                '/audio/send.mp3', '/audio/send.wav',
+                '/audio/outgoing.mp3', '/audio/outgoing.wav',
+                '/send.mp3', '/send.wav',
+                '/sounds/send.mp3', '/sounds/send.wav'
+            ],
+            'receive': [
+                '/audio/receive.mp3', '/audio/receive.wav',
+                '/audio/incoming.mp3', '/audio/incoming.wav',
+                '/receive.mp3', '/receive.wav',
+                '/sounds/receive.mp3', '/sounds/receive.wav'
+            ]
+        };
+
+        const paths = soundPaths[type] || [];
+        
+        for (const path of paths) {
+            try {
+                const response = await fetch(path, { cache: 'no-cache' });
+                if (response.ok) {
+                    const arrayBuffer = await response.arrayBuffer();
+                    const buffer = await adminAudioContext.decodeAudioData(arrayBuffer);
+                    
+                    if (type === 'vanish') {
+                        adminVanishBuffer = buffer;
+                    } else if (type === 'send') {
+                        adminSendBuffer = buffer;
+                    } else if (type === 'receive') {
+                        adminReceiveBuffer = buffer;
+                    }
+                    
+                    adminCustomSoundLoaded = true;
+                    console.log('✅ Admin ' + type + ' sound loaded from:', path);
+                    return;
+                }
+            } catch (e) {}
+        }
+        
+        console.log('⚠️ No custom admin ' + type + ' sound found, generating fallback');
+        generateAdminFallbackSound(type);
+    }
+
+    function generateAdminFallbackSound(type) {
+        try {
+            if (!adminAudioContext) return;
+            
+            const sampleRate = adminAudioContext.sampleRate;
+            let duration = 0.3;
+            let frequency = 600;
+            
+            if (type === 'vanish') {
+                duration = 0.4;
+                frequency = 400;
+            } else if (type === 'send') {
+                duration = 0.15;
+                frequency = 800;
+            } else if (type === 'receive') {
+                duration = 0.2;
+                frequency = 500;
+            }
+            
+            const sampleCount = duration * sampleRate;
+            const buffer = adminAudioContext.createBuffer(1, sampleCount, sampleRate);
+            const data = buffer.getChannelData(0);
+            
+            for (let i = 0; i < sampleCount; i++) {
+                const t = i / sampleRate;
+                
+                if (type === 'vanish') {
+                    const freq = frequency + t * 1200;
+                    const val = Math.sin(2 * Math.PI * freq * t) * Math.exp(-t * 5);
+                    const shimmer = Math.sin(2 * Math.PI * (freq * 2.5) * t) * 0.3 * Math.exp(-t * 8);
+                    data[i] = (val + shimmer) * 0.5;
+                } else if (type === 'send') {
+                    data[i] = Math.sin(2 * Math.PI * frequency * t) * Math.exp(-t * 20) * 0.5;
+                } else if (type === 'receive') {
+                    data[i] = Math.sin(2 * Math.PI * frequency * t) * Math.exp(-t * 15) * 0.4;
+                    if (i > sampleRate * 0.1) {
+                        data[i] += Math.sin(2 * Math.PI * (frequency * 0.8) * (t - 0.1)) * Math.exp(-(t - 0.1) * 20) * 0.2;
+                    }
+                }
+            }
+            
+            if (type === 'vanish') {
+                adminVanishBuffer = buffer;
+            } else if (type === 'send') {
+                adminSendBuffer = buffer;
+            } else if (type === 'receive') {
+                adminReceiveBuffer = buffer;
+            }
+            
+            console.log('✅ Admin fallback ' + type + ' sound generated');
+        } catch (e) {}
+    }
+
+    function playAdminSound(type) {
+        try {
+            if (!adminAudioContext) {
+                const initialized = initAdminAudio();
+                if (!initialized) return;
+            }
+            
+            let buffer = null;
+            if (type === 'vanish') buffer = adminVanishBuffer;
+            else if (type === 'send') buffer = adminSendBuffer;
+            else if (type === 'receive') buffer = adminReceiveBuffer;
+            
+            if (!buffer) {
+                loadAdminSound(type);
+                setTimeout(function() { playAdminSound(type); }, 500);
+                return;
+            }
+            
+            if (adminAudioContext.state === 'suspended') {
+                adminAudioContext.resume().catch(function(e) {
+                    console.log(' Could not resume admin audio context:', e);
+                    playAdminHtml5Fallback(type);
+                    return;
+                });
+            }
+            
+            const source = adminAudioContext.createBufferSource();
+            source.buffer = buffer;
+            
+            const gainNode = adminAudioContext.createGain();
+            gainNode.gain.value = 0.25;
+            
+            source.connect(gainNode);
+            gainNode.connect(adminAudioContext.destination);
+            
+            source.start();
+            console.log('🔊 Admin ' + type + ' sound played');
+            
+        } catch (e) {
+            console.log('⚠️ Could not play admin ' + type + ' sound:', e);
+            playAdminHtml5Fallback(type);
+        }
+    }
+
+    function playAdminHtml5Fallback(type) {
+        try {
+            const soundPaths = {
+                'vanish': [
+                    '/audio/vanish.mp3', '/audio/vanish.wav',
+                    '/audio/notification.mp3', '/audio/notification.wav',
+                    '/vanish.mp3', '/vanish.wav'
+                ],
+                'send': [
+                    '/audio/send.mp3', '/audio/send.wav',
+                    '/audio/outgoing.mp3', '/audio/outgoing.wav',
+                    '/send.mp3', '/send.wav'
+                ],
+                'receive': [
+                    '/audio/receive.mp3', '/audio/receive.wav',
+                    '/audio/incoming.mp3', '/audio/incoming.wav',
+                    '/receive.mp3', '/receive.wav'
+                ]
+            };
+            
+            const paths = soundPaths[type] || [];
+            let audioPlayed = false;
+            
+            for (const path of paths) {
+                try {
+                    const audio = new Audio(path);
+                    audio.volume = 0.3;
+                    audio.play().then(function() {
+                        console.log('🔊 Admin ' + type + ' sound played (HTML5 fallback):', path);
+                        audioPlayed = true;
+                    }).catch(function(e) {});
+                    if (audioPlayed) break;
+                } catch (e) {}
+            }
+        } catch (e) {}
+    }
+
+    function enableAdminSound() {
+        if (!adminAudioContext) { initAdminAudio(); }
+    }
+
+    document.addEventListener('click', enableAdminSound, { once: true });
+    document.addEventListener('keydown', enableAdminSound, { once: true });
+    document.addEventListener('touchstart', enableAdminSound, { once: true });
+    setTimeout(function() { initAdminAudio(); }, 2000);
+
+    // ===== MARK ALL MESSAGES AS READ WHEN ADMIN OPENS CHAT =====
+    function getVanishSeconds(messageContent) {
+        const length = messageContent ? messageContent.length : 0;
+        return Math.min(MAX_VANISH_SECONDS, BASE_VANISH_SECONDS + Math.floor(length * EXTRA_TIME_PER_CHAR));
+    }
+
+    function markAllUserMessagesAsRead() {
+        const unreadMessages = document.querySelectorAll('.message-wrapper:not([data-is-read="true"])');
+        
+        if (unreadMessages.length === 0) {
+            console.log('No unread messages from this user');
+            return;
+        }
+        
+        console.log('Admin marking ' + unreadMessages.length + ' messages as read');
+        
+        unreadMessages.forEach(function(messageElement) {
+            const messageId = messageElement.dataset.messageId;
+            const isFromAdmin = messageElement.dataset.fromAdmin === 'true';
+            
+            if (isFromAdmin) return;
+            
+            const textElement = messageElement.querySelector('.message-text');
+            let vanishSeconds = 60;
+            if (textElement) {
+                vanishSeconds = getVanishSeconds(textElement.textContent);
+            }
+            messageElement.dataset.vanishSeconds = vanishSeconds;
+            
+            messageElement.dataset.isRead = 'true';
+            messageElement.dataset.readAt = new Date().toISOString();
+            messageElement.classList.add('message-read');
+            
+            const statusElement = messageElement.querySelector('.message-status-pending');
+            if (statusElement) statusElement.remove();
+            
+            const bubble = messageElement.querySelector('.message-bubble');
+            if (bubble) {
+                const existingStatus = bubble.querySelector('.read-status');
+                if (!existingStatus) {
+                    const readStatus = document.createElement('div');
+                    readStatus.className = 'message-status read-status';
+                    readStatus.textContent = '';
+                    bubble.appendChild(readStatus);
+                }
+            }
+            
+            const timerElement = messageElement.querySelector('.message-vanish-timer .vanish-indicator');
+            if (timerElement) {
+                timerElement.innerHTML = 'Vanish in <span class="vanish-countdown">' + vanishSeconds + '</span>s';
+            }
+            
+            socket.emit('mark-message-read', { 
+                messageId: messageId
+            });
+        });
+        
+        socket.emit('mark-all-read', { 
+            userId: targetUserId 
+        });
+        
+        setTimeout(function() {
+            document.querySelectorAll('.message-wrapper[data-is-read="true"]:not([data-vanished="true"])').forEach(function(element) {
+                const messageId = element.dataset.messageId;
+                if (!vanishQueue[messageId]) {
+                    scheduleMessageVanish(messageId);
+                }
+            });
+        }, 500);
+    }
+
+    // ===== SOCKET EVENTS =====
+    socket.on('connect', function() {
+        console.log('Admin connected to chat server');
         updateOnlineStatus('online');
+        setTimeout(markAllUserMessagesAsRead, 1000);
     });
 
-    socket.on('connect_error', (error) => {
-        console.error('❌ Connection error:', error);
-        updateOnlineStatus('offline');
-        
-        // Fallback to polling
-        startPolling();
-    });
-
-    socket.on('disconnect', (reason) => {
-        console.log('🔌 Disconnected:', reason);
+    socket.on('connect_error', function(error) {
+        console.error('Connection error:', error);
         updateOnlineStatus('offline');
     });
 
-    socket.on('new-message', (message) => {
-        console.log('📩 New message received:', message);
+    socket.on('disconnect', function(reason) {
+        console.log('Disconnected:', reason);
+        updateOnlineStatus('offline');
+    });
+
+    socket.on('new-message', function(message) {
+        console.log(' New message received:', message);
+        if (String(message.user_id) !== String(targetUserId)) return;
+        if (document.querySelector('[data-message-id="' + message.id + '"]')) return;
         
-        // Only handle messages for this specific user
-        if (message.user_id === targetUserId || (message.is_from_admin && message.user_id === currentUserId)) {
-            handleNewMessage(message);
+        // Play receive sound
+        playAdminSound('receive');
+        handleNewMessage(message);
+        
+        if (!message.is_from_admin) {
+            setTimeout(function() {
+                markAllUserMessagesAsRead();
+            }, 500);
         }
     });
 
-    socket.on('typing', (data) => {
-        if (data.userId === targetUserId) {
-            showTypingIndicator(data.isTyping);
-        }
+    socket.on('all-messages-read', function(data) {
+        console.log('All messages marked as read for user:', data.userId);
     });
 
-    socket.on('user-status', (data) => {
+    socket.on('message-vanished', function(data) {
+        console.log('Message vanished:', data);
+        vanishMessage(data.messageId);
+    });
+
+    socket.on('typing', function(data) {
+        if (String(data.userId) !== String(targetUserId)) return;
+        showTypingIndicator(data.isTyping);
+    });
+
+    socket.on('user-status', function(data) {
         if (data.userId === targetUserId) {
             updateOnlineStatus(data.status);
         }
     });
 
-    socket.on('message-read', (data) => {
-        markMessageAsRead(data.messageId);
-    });
-
-    socket.on('error', (error) => {
+    socket.on('error', function(error) {
         console.error('Socket error:', error);
         showNotification(error.message || 'An error occurred', 'error');
     });
 
-    socket.on('connected', (data) => {
-        console.log("connected");
-        
-    });
+    // ===== VANISH SYSTEM =====
+    function scheduleMessageVanish(messageId) {
+        const messageElement = document.querySelector('[data-message-id="' + messageId + '"]');
+        if (!messageElement) return;
 
-    // Handle new message
-    function handleNewMessage(message) {
-        console.log('📨 Processing message for display:', message);
-        
-        // Remove "no messages" placeholder if it exists
-        const noMessages = document.querySelector('.no-messages');
-        if (noMessages) {
-            noMessages.remove();
+        if (vanishQueue[messageId]) {
+            clearTimeout(vanishQueue[messageId]);
         }
 
-        // Hide typing indicator when new message arrives
-        showTypingIndicator(false);
+        const isRead = messageElement.dataset.isRead === 'true';
+        const readAt = messageElement.dataset.readAt;
 
-        // Check if message already exists
-        const existingMessage = document.querySelector(`[data-message-id="${message.id}"]`);
-        if (existingMessage) {
-            console.log('⚠️ Message already exists, skipping');
+        if (!isRead || !readAt) return;
+
+        let vanishSeconds = parseInt(messageElement.dataset.vanishSeconds);
+        if (!vanishSeconds || vanishSeconds < 10) {
+            const textElement = messageElement.querySelector('.message-text');
+            if (textElement) {
+                vanishSeconds = getVanishSeconds(textElement.textContent);
+            } else {
+                vanishSeconds = 60;
+            }
+            messageElement.dataset.vanishSeconds = vanishSeconds;
+        }
+
+        const readTime = new Date(readAt).getTime();
+        const elapsed = (Date.now() - readTime) / 1000;
+        const remaining = Math.max(0, vanishSeconds - elapsed);
+
+        if (remaining <= 0) {
+            vanishMessage(messageId);
             return;
         }
 
-        // Create and add message element
+        console.log('Message ' + messageId + ' will vanish in ' + remaining.toFixed(1) + 's (total: ' + vanishSeconds + 's)');
+
+        let remainingTime = remaining;
+        const countdownInterval = setInterval(function() {
+            remainingTime--;
+            if (remainingTime <= 0) {
+                clearInterval(countdownInterval);
+                return;
+            }
+            updateVanishTimer(messageId, remainingTime);
+        }, 1000);
+
+        vanishQueue[messageId] = setTimeout(function() {
+            clearInterval(countdownInterval);
+            vanishMessage(messageId);
+        }, remaining * 1000);
+
+        updateVanishTimer(messageId, remaining);
+    }
+
+    function updateVanishTimer(messageId, remainingSeconds) {
+        const messageElement = document.querySelector('[data-message-id="' + messageId + '"]');
+        if (!messageElement) return;
+
+        const timerElement = messageElement.querySelector('.message-vanish-timer .vanish-indicator');
+        if (!timerElement) return;
+
+        const seconds = Math.ceil(remainingSeconds);
+        if (seconds > 0) {
+            timerElement.innerHTML = 'Vanish in <span class="vanish-countdown">' + seconds + '</span>s';
+        } else {
+            timerElement.textContent = 'Vanishing...';
+        }
+    }
+
+    function vanishMessage(messageId) {
+        const messageElement = document.querySelector('[data-message-id="' + messageId + '"]');
+        if (!messageElement) return;
+
+        if (vanishQueue[messageId]) {
+            clearTimeout(vanishQueue[messageId]);
+            delete vanishQueue[messageId];
+        }
+
+        if (messageElement.dataset.vanished === 'true') return;
+        messageElement.dataset.vanished = 'true';
+
+        console.log('Vanishing message:', messageId);
+        playAdminSound('vanish');
+
+        const bubble = messageElement.querySelector('.message-bubble');
+
+        messageElement.style.transition = 'all 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55)';
+        messageElement.style.transform = 'scale(0.8)';
+        messageElement.style.opacity = '0.5';
+
+        setTimeout(function() {
+            createShatterEffect(messageElement);
+            messageElement.style.transform = 'scale(0.5) rotate(-5deg)';
+            messageElement.style.opacity = '0.2';
+            if (bubble) {
+                bubble.style.transform = 'scale(0.7)';
+                bubble.style.backgroundColor = 'rgba(229, 57, 53, 0.1)';
+            }
+        }, 300);
+
+        setTimeout(function() {
+            messageElement.style.transform = 'scale(0) rotate(10deg)';
+            messageElement.style.opacity = '0';
+            messageElement.style.margin = '0';
+            messageElement.style.padding = '0';
+            messageElement.style.height = '0';
+            messageElement.style.overflow = 'hidden';
+        }, 700);
+
+        setTimeout(function() {
+            messageElement.remove();
+            if (document.querySelectorAll('.message-wrapper').length === 0) {
+                showEmptyState();
+            }
+        }, 1000);
+
+        socket.emit('message-vanished', { messageId: messageId });
+    }
+
+    function createShatterEffect(element) {
+        const rect = element.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        const colors = ['#ff6b6b', '#ff9f43', '#ffd93d', '#6bcb77', '#4d96ff', '#9b59b6', '#fd79a8', '#00cec9'];
+        const particleCount = 12 + Math.floor(Math.random() * 8);
+
+        for (let i = 0; i < particleCount; i++) {
+            const particle = document.createElement('div');
+            const size = 3 + Math.random() * 5;
+            const angle = Math.random() * Math.PI * 2;
+            const distance = 30 + Math.random() * 100;
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            const rotation = Math.random() * 360;
+            const isSquare = Math.random() > 0.5;
+
+            particle.style.cssText = 
+                'position: fixed; left: ' + centerX + 'px; top: ' + centerY + 'px; ' +
+                'width: ' + size + 'px; height: ' + size + 'px; ' +
+                'background: ' + color + '; ' +
+                (isSquare ? 'border-radius: 2px;' : 'border-radius: 50%;') +
+                'pointer-events: none; z-index: 99999; ' +
+                'transition: all 0.7s cubic-bezier(0.68, -0.55, 0.265, 1.55); ' +
+                'box-shadow: 0 0 10px ' + color + '40; ' +
+                'transform: rotate(' + rotation + 'deg);';
+
+            document.body.appendChild(particle);
+
+            requestAnimationFrame(function() {
+                const tx = Math.cos(angle) * distance;
+                const ty = Math.sin(angle) * distance - 20;
+                particle.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(0) rotate(' + (rotation + 180) + 'deg)';
+                particle.style.opacity = '0';
+            });
+
+            setTimeout(function() {
+                particle.remove();
+            }, 800);
+        }
+    }
+
+    function showEmptyState() {
+        if (document.querySelector('.no-messages')) return;
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'no-messages';
+        emptyDiv.innerHTML = 
+            '<div class="no-messages-icon">💬</div>' +
+            '<div class="no-messages-text">All messages vanished</div>' +
+            '<p class="no-messages-hint">Start a new conversation</p>';
+        messagesContainer.insertBefore(emptyDiv, scrollAnchor);
+    }
+
+    // ===== HANDLE NEW MESSAGE =====
+    function handleNewMessage(message) {
+        const noMessages = document.querySelector('.no-messages');
+        if (noMessages) noMessages.remove();
+
+        showTypingIndicator(false);
+
         const messageElement = createMessageElement(message);
-             // Insert before typing indicator if it exists, otherwise before scroll anchor
-        const insertBeforeElement = typingIndicatorContainer || scrollAnchor;
-        messagesContainer.insertBefore(messageElement, insertBeforeElement);
-        
-        // ALWAYS insert before scroll anchor to ensure messages stay in chronological order
-        messagesContainer.insertBefore(messageElement, scrollAnchor);
-        
-        // Update message count
-        if (messageCountElement) {
-            messageCountElement.textContent = parseInt(messageCountElement.textContent) + 1;
+        const existingMessages = document.querySelectorAll('.message-wrapper');
+
+        if (existingMessages.length === 0) {
+            messagesContainer.insertBefore(messageElement, scrollAnchor);
+        } else {
+            const newTimestamp = new Date(message.created_at).getTime();
+            let inserted = false;
+
+            for (let i = existingMessages.length - 1; i >= 0; i--) {
+                const existingMsg = existingMessages[i];
+                const existingTimestamp = parseInt(existingMsg.dataset.timestamp);
+
+                if (newTimestamp > existingTimestamp) {
+                    messagesContainer.insertBefore(messageElement, existingMsg.nextSibling);
+                    inserted = true;
+                    break;
+                }
+            }
+
+            if (!inserted) {
+                messagesContainer.insertBefore(messageElement, scrollAnchor);
+            }
         }
 
-        // Scroll to bottom
         scrollToBottom();
-        
-        // Play notification sound for new messages from user
-        if (!message.is_from_admin) {
+
+        if (message.is_from_admin) {
             playNotificationSound();
+            setTimeout(function() {
+                markMessageAsRead(message.id);
+            }, 500);
         }
     }
 
-    // Update online status
-    function updateOnlineStatus(status) {
-        if (!onlineStatusElement) return;
-        
-        const statusMap = {
-            'online': { text: '●', className: 'online', label: 'Online' },
-            'offline': { text: '●', className: 'offline', label: 'Offline' },
-            'typing': { text: '●', className: 'typing', label: 'Typing...' }
-        };
-        
-        const statusInfo = statusMap[status] || statusMap.offline;
-        onlineStatusElement.textContent = statusInfo.text;
-        onlineStatusElement.className = `status-indicator ${statusInfo.className}`;
-        
-        // Update the label
-        const statusLabel = document.querySelector('.stat-header:last-child .stat-label-header');
-        if (statusLabel) {
-            statusLabel.textContent = statusInfo.label;
-        }
-    }
-
-    // Create message element
     function createMessageElement(message) {
-        const isAdmin = message.is_from_admin;
-        const messageWrapper = document.createElement('div');
-        messageWrapper.className = `message-wrapper ${isAdmin ? 'message-right' : 'message-left'}`;
-        messageWrapper.dataset.messageId = message.id;
-        messageWrapper.dataset.userId = message.user_id;
+        const isFromAdmin = message.is_from_admin;
+        const isRead = message.is_read || false;
+        const contentLength = message.content ? message.content.length : 0;
+        const vanishSeconds = Math.min(300, Math.max(60, 60 + Math.floor(contentLength / 3)));
         
-        // Format time
+        const messageWrapper = document.createElement('div');
+        messageWrapper.className = 'message-wrapper ' + (isFromAdmin ? 'message-right' : 'message-left') + (isRead ? ' message-read' : '');
+        messageWrapper.dataset.messageId = message.id;
+        messageWrapper.dataset.timestamp = new Date(message.created_at).getTime();
+        messageWrapper.dataset.userId = message.user_id;
+        messageWrapper.dataset.isRead = isRead;
+        messageWrapper.dataset.readAt = message.read_at || '';
+        messageWrapper.dataset.vanished = 'false';
+        messageWrapper.dataset.fromAdmin = isFromAdmin ? 'true' : 'false';
+        messageWrapper.dataset.vanishSeconds = vanishSeconds;
+
         const time = new Date(message.created_at);
         const formattedTime = time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        
-        // Determine username
+
         let username = message.username;
-        if (isAdmin) {
+        if (isFromAdmin) {
             username = 'You';
-        } else if (message.user_id === targetUserId) {
+        } else {
             username = targetUsername;
         }
-        
-        // Build message HTML based on sender
+
         let messageHTML = '';
-        
-        if (isAdmin) {
-            // Admin message (right side)
-            messageHTML = `
-                <div class="message-content-wrapper">
-                    <div class="message-meta">
-                        <span class="message-username">${escapeHtml(username)}</span>
-                        <span class="message-time">${formattedTime}</span>
-                    </div>
-                    <div class="message-bubble admin-bubble">
-                        <div class="message-text">
-                            ${escapeHtml(message.content)}
-                        </div>
-                    </div>
-                </div>
-                <div class="message-avatar-right">
-                    <div class="avatar-circle-small admin-avatar">
-                        <span class="avatar-text-small">A</span>
-                    </div>
-                </div>
-            `;
+
+        if (isFromAdmin) {
+            messageHTML = 
+                '<div class="message-content-wrapper">' +
+                    '<div class="message-meta">' +
+                        '<span class="message-username">' + escapeHtml(username) + '</span>' +
+                        '<span class="message-time">' + formattedTime + '</span>' +
+                    '</div>' +
+                    '<div class="message-bubble admin-bubble">' +
+                        '<div class="message-text">' + escapeHtml(message.content) + '</div>' +
+                        (isRead ? '<div class="message-status read-status"></div>' : '') +
+                        '<div class="message-vanish-timer">' +
+                            '<span class="vanish-indicator">' + (isRead ? 'Vanish in <span class="vanish-countdown">' + vanishSeconds + '</span>s' : 'Waiting to be read') + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="message-avatar-right">' +
+                    '<div class="avatar-circle-small admin-avatar">' +
+                        '<span class="avatar-text-small">A</span>' +
+                    '</div>' +
+                '</div>';
         } else {
-            // User message (left side)
-            messageHTML = `
-                <div class="message-avatar-left">
-                    <div class="avatar-circle-small">
-                        <span class="avatar-text-small">${targetUserInitial}</span>
-                    </div>
-                </div>
-                <div class="message-content-wrapper">
-                    <div class="message-meta">
-                        <span class="message-username">${escapeHtml(username)}</span>
-                        <span class="message-time">${formattedTime}</span>
-                    </div>
-                    <div class="message-bubble user-bubble">
-                        <div class="message-text">
-                            ${escapeHtml(message.content)}
-                        </div>
-                        ${message.is_read ? '<div class="message-status"><span class="read-status">✓ Read</span></div>' : ''}
-                    </div>
-                </div>
-            `;
+            messageHTML = 
+                '<div class="message-avatar-left">' +
+                    '<div class="avatar-circle-small">' +
+                        '<span class="avatar-text-small">' + targetUserInitial + '</span>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="message-content-wrapper">' +
+                    '<div class="message-meta">' +
+                        '<span class="message-username">' + escapeHtml(username) + '</span>' +
+                        '<span class="message-time">' + formattedTime + '</span>' +
+                        (!isRead ? '<span class="message-status-pending">●</span>' : '') +
+                    '</div>' +
+                    '<div class="message-bubble user-bubble">' +
+                        '<div class="message-text">' + escapeHtml(message.content) + '</div>' +
+                        (isRead ? '<div class="message-status read-status"></div>' : '') +
+                        '<div class="message-vanish-timer">' +
+                            '<span class="vanish-indicator">' + (isRead ? 'Vanish in <span class="vanish-countdown">' + vanishSeconds + '</span>s' : 'Waiting to be read') + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>';
         }
-        
+
         messageWrapper.innerHTML = messageHTML;
-        
-        // Add fade-in animation
+
         messageWrapper.style.opacity = '0';
-        messageWrapper.style.transform = isAdmin ? 'translateX(20px)' : 'translateX(-20px)';
-        setTimeout(() => {
+        messageWrapper.style.transform = isFromAdmin ? 'translateX(20px)' : 'translateX(-20px)';
+        setTimeout(function() {
             messageWrapper.style.transition = 'all 0.3s ease';
             messageWrapper.style.opacity = '1';
             messageWrapper.style.transform = 'translateX(0)';
         }, 10);
-        
+
+        if (isRead && message.read_at) {
+            setTimeout(function() {
+                scheduleMessageVanish(message.id);
+            }, 500);
+        }
+
         return messageWrapper;
     }
 
-    // Escape HTML
+    // ===== MARK MESSAGE AS READ =====
+    function markMessageAsRead(messageId) {
+        const messageElement = document.querySelector('[data-message-id="' + messageId + '"]');
+        if (!messageElement) return;
+        if (messageElement.dataset.isRead === 'true') return;
+
+        const textElement = messageElement.querySelector('.message-text');
+        let vanishSeconds = 60;
+        if (textElement) {
+            vanishSeconds = getVanishSeconds(textElement.textContent);
+        }
+        messageElement.dataset.vanishSeconds = vanishSeconds;
+
+        messageElement.dataset.isRead = 'true';
+        messageElement.dataset.readAt = new Date().toISOString();
+        messageElement.classList.add('message-read');
+
+        const isFromAdmin = messageElement.dataset.fromAdmin === 'true';
+        if (!isFromAdmin) {
+            const statusElement = messageElement.querySelector('.message-status-pending');
+            if (statusElement) statusElement.remove();
+        }
+
+        const bubble = messageElement.querySelector('.message-bubble');
+        if (bubble) {
+            const existingStatus = bubble.querySelector('.read-status');
+            if (!existingStatus) {
+                const readStatus = document.createElement('div');
+                readStatus.className = 'message-status read-status';
+                readStatus.textContent = '';
+                bubble.appendChild(readStatus);
+            }
+        }
+
+        const timerElement = messageElement.querySelector('.message-vanish-timer .vanish-indicator');
+        if (timerElement) {
+            timerElement.innerHTML = 'Vanish in <span class="vanish-countdown">' + vanishSeconds + '</span>s';
+        }
+
+        setTimeout(function() {
+            scheduleMessageVanish(messageId);
+        }, 500);
+    }
+
+    // ===== UTILITY FUNCTIONS =====
     function escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
 
-    // Scroll to bottom
     function scrollToBottom() {
         scrollAnchor.scrollIntoView({ behavior: 'smooth' });
     }
 
-    // Initial scroll
-    setTimeout(scrollToBottom, 100);
+    function updateOnlineStatus(status) {
+        if (!onlineStatusElement) return;
+        const statusMap = {
+            'online': { text: '●', className: 'online', label: 'Online' },
+            'offline': { text: '●', className: 'offline', label: 'Offline' },
+            'typing': { text: '●', className: 'typing', label: 'Typing...' }
+        };
+        const statusInfo = statusMap[status] || statusMap.offline;
+        onlineStatusElement.textContent = statusInfo.text;
+        onlineStatusElement.className = 'status-indicator ' + statusInfo.className;
+        
+        const statusLabel = document.querySelector('.stat-header:last-child .stat-label-header');
+        if (statusLabel) {
+            statusLabel.textContent = statusInfo.label;
+        }
+    }
 
-    // Typing indicator - Show/hide with proper positioning
     function showTypingIndicator(show) {
         if (show) {
-            // Ensure typing indicator container exists
             if (!typingIndicatorContainer) {
                 createTypingIndicatorContainer();
             }
-            
-            // Show the indicator
             typingIndicator.style.display = 'flex';
-            
-            // Position it before scroll anchor
             messagesContainer.insertBefore(typingIndicatorContainer, scrollAnchor);
-            
-            // Update online status to typing
             updateOnlineStatus('typing');
-            
-            // Auto-hide after 3 seconds of no new typing
             clearTimeout(typingIndicator._hideTimeout);
-            typingIndicator._hideTimeout = setTimeout(() => {
+            typingIndicator._hideTimeout = setTimeout(function() {
                 showTypingIndicator(false);
                 updateOnlineStatus('online');
-            }, 3000);
+            }, 5000);
         } else {
             if (typingIndicator) {
                 typingIndicator.style.display = 'none';
@@ -411,158 +934,84 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Create typing indicator container if it doesn't exist
     function createTypingIndicatorContainer() {
+        if (typingIndicatorContainer && typingIndicatorContainer.parentNode) {
+            typingIndicatorContainer.parentNode.removeChild(typingIndicatorContainer);
+        }
+        
         const container = document.createElement('div');
         container.id = 'typing-indicator-container';
-        container.innerHTML = `
-            <div id="typing-indicator" class="typing-indicator">
-                <div class="typing-dots">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
-                <span class="typing-text">${targetUsername} is typing...</span>
-            </div>
-        `;
-        messagesContainer.appendChild(container);
+        container.innerHTML = 
+            '<div id="typing-indicator" class="typing-indicator" style="display: none;">' +
+                '<div class="typing-dots">' +
+                    '<span></span><span></span><span></span>' +
+                '</div>' +
+                '<span class="typing-text">' + targetUsername + ' is typing...</span>' +
+            '</div>';
         
-        // Update references
+        if (scrollAnchor) {
+            messagesContainer.insertBefore(container, scrollAnchor);
+        } else {
+            messagesContainer.appendChild(container);
+        }
+        
         typingIndicatorContainer = container;
         typingIndicator = container.querySelector('#typing-indicator');
     }
 
-    // Mark message as read
-    function markMessageAsRead(messageId) {
-        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-        if (messageElement) {
-            const messageDiv = messageElement.querySelector('.message-bubble');
-            if (!messageDiv.querySelector('.message-status')) {
-                messageDiv.innerHTML += '<div class="message-status"><span class="read-status">✓ Read</span></div>';
-            }
+    // ===== NOTIFICATION SOUND =====
+    let notificationAudioEnabled = false;
+
+    function enableNotificationAudio() {
+        if (!notificationAudioEnabled) {
+            const silentAudio = new Audio();
+            silentAudio.volume = 0;
+            silentAudio.play().then(function() {
+                notificationAudioEnabled = true;
+                localStorage.setItem('audioEnabled', 'true');
+            }).catch(function(e) {});
         }
     }
 
-    // Admin typing detection
-    messageInput.addEventListener('keydown', function(e) {
-        // Don't send typing on Enter, Tab, Shift, Ctrl, Alt, etc.
-        const ignoredKeys = ['Enter', 'Tab', 'Shift', 'Control', 'Alt', 'Meta', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
-        
-        if (!ignoredKeys.includes(e.key)) {
-            const now = Date.now();
-            
-            // Debounce typing events
-            if (now - lastTypingTime > TYPING_DEBOUNCE) {
-                lastTypingTime = now;
-                
-                // Only send typing if there's content in the input
-                if (this.value.trim().length > 0 && !isTyping) {
-                    isTyping = true;
-                    socket.emit('typing', { 
-                        targetUserId: targetUserId, 
-                        isTyping: true 
-                    });
-                    console.log('⌨️ Admin typing started...');
-                }
-            }
-            
-            // Reset the stop typing timeout
-            clearTimeout(typingTimeout);
-            typingTimeout = setTimeout(() => {
-                if (isTyping) {
-                    isTyping = false;
-                    socket.emit('typing', { 
-                        targetUserId: targetUserId, 
-                        isTyping: false 
-                    });
-                    console.log('⌨️ Admin typing stopped');
-                }
-            }, TYPING_STOP_DELAY);
-        }
-    });
+    document.addEventListener('click', enableNotificationAudio, { once: true });
+    document.addEventListener('keydown', enableNotificationAudio, { once: true });
+    document.addEventListener('touchstart', enableNotificationAudio, { once: true });
 
-    // Also detect when admin pastes content
-    messageInput.addEventListener('paste', function() {
-        setTimeout(() => {
-            if (this.value.trim().length > 0 && !isTyping) {
-                isTyping = true;
-                socket.emit('typing', { 
-                    targetUserId: targetUserId, 
-                    isTyping: true 
-                });
-                console.log('📋 Admin paste detected, sending typing...');
-                
-                // Set timeout to stop typing indicator
-                clearTimeout(typingTimeout);
-                typingTimeout = setTimeout(() => {
-                    if (isTyping) {
-                        isTyping = false;
-                        socket.emit('typing', { 
-                            targetUserId: targetUserId, 
-                            isTyping: false 
-                        });
-                    }
-                }, TYPING_STOP_DELAY);
-            }
-        }, 100);
-    });
+    if (localStorage.getItem('audioEnabled') === 'true') {
+        setTimeout(enableNotificationAudio, 1000);
+    }
 
-    // Detect when admin input is cleared
-    messageInput.addEventListener('input', function() {
-        if (this.value.trim().length === 0 && isTyping) {
-            isTyping = false;
-            socket.emit('typing', { 
-                targetUserId: targetUserId, 
-                isTyping: false 
-            });
-            console.log('⌨️ Admin input cleared, typing stopped');
-            clearTimeout(typingTimeout);
-        }
-    });
-
-    // Play notification sound
     function playNotificationSound() {
+        if (!notificationAudioEnabled) return;
         try {
-            const audio = new Audio('/notification.mp3');
+            const audio = new Audio('./audio/notification.wav');
             audio.volume = 0.3;
-            audio.play().catch(e => console.log('Audio play failed:', e));
-        } catch (e) {
-            console.log('Notification sound error:', e);
-        }
+            audio.play().catch(function(e) {});
+        } catch (e) {}
     }
 
-    // Show notification
-    function showNotification(message, type = 'info') {
-        // Create notification element
+    function showNotification(message, type) {
+        type = type || 'info';
         const notification = document.createElement('div');
-        notification.className = `notification ${type}`;
-        notification.innerHTML = `
-            <span>${escapeHtml(message)}</span>
-            <button class="notification-close">&times;</button>
-        `;
-        
+        notification.className = 'notification ' + type;
+        notification.innerHTML = '<span>' + escapeHtml(message) + '</span><button class="notification-close">&times;</button>';
         document.body.appendChild(notification);
-        
-        // Add close functionality
-        notification.querySelector('.notification-close').addEventListener('click', () => {
+        notification.querySelector('.notification-close').addEventListener('click', function() {
             notification.remove();
         });
-        
-        // Auto-remove after 5 seconds
-        setTimeout(() => {
+        setTimeout(function() {
             if (notification.parentNode) {
                 notification.remove();
             }
         }, 5000);
     }
 
-    // Character counter for admin input
+    // ===== CHARACTER COUNTER =====
     messageInput.addEventListener('input', function() {
         const length = this.value.length;
         const charCountElement = document.getElementById('char-count');
         if (charCountElement) {
             charCountElement.textContent = length;
-            
             if (length > 450) {
                 charCountElement.style.color = 'var(--accent-red)';
             } else if (length > 400) {
@@ -573,84 +1022,102 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Form submission
-    messageForm.addEventListener('submit', async function(e) {
+    // ===== TYPING DETECTION =====
+    messageInput.addEventListener('input', function() {
+        const now = Date.now();
+        const hasContent = this.value.trim().length > 0;
+        
+        if (hasContent) {
+            if (now - lastTypingTime > TYPING_DEBOUNCE) {
+                lastTypingTime = now;
+                if (!isTyping) {
+                    isTyping = true;
+                    socket.emit('typing', { targetUserId: targetUserId, isTyping: true });
+                } else {
+                    socket.emit('typing', { targetUserId: targetUserId, isTyping: true });
+                }
+            }
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(function() {
+                if (isTyping) {
+                    isTyping = false;
+                    socket.emit('typing', { targetUserId: targetUserId, isTyping: false });
+                }
+            }, TYPING_STOP_DELAY);
+        } else {
+            if (isTyping) {
+                isTyping = false;
+                socket.emit('typing', { targetUserId: targetUserId, isTyping: false });
+                clearTimeout(typingTimeout);
+            }
+        }
+    });
+
+    messageInput.addEventListener('keydown', function(e) {
+        const ignoredKeys = ['Enter', 'Tab', 'Shift', 'Control', 'Alt', 'Meta', 'Escape', 
+                            'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        
+        if (!ignoredKeys.includes(e.key) && this.value.trim().length > 0) {
+            const now = Date.now();
+            if (now - lastTypingTime > 200) {
+                lastTypingTime = now;
+                if (!isTyping) {
+                    isTyping = true;
+                    socket.emit('typing', { targetUserId: targetUserId, isTyping: true });
+                }
+                clearTimeout(typingTimeout);
+                typingTimeout = setTimeout(function() {
+                    if (isTyping) {
+                        isTyping = false;
+                        socket.emit('typing', { targetUserId: targetUserId, isTyping: false });
+                    }
+                }, TYPING_STOP_DELAY);
+            }
+        }
+    });
+
+    // ===== FORM SUBMISSION =====
+    messageForm.addEventListener('submit', function(e) {
         e.preventDefault();
-        
         const content = messageInput.value.trim();
-        
         if (!content) {
             showNotification('Please enter a message', 'error');
             return;
         }
-        
         if (content.length > 500) {
             showNotification('Message too long (max 500 characters)', 'error');
             return;
         }
 
-        // Stop typing indicator when sending
         if (isTyping) {
             isTyping = false;
-            socket.emit('typing', { 
-                targetUserId: targetUserId, 
-                isTyping: false 
-            });
+            socket.emit('typing', { targetUserId: targetUserId, isTyping: false });
             clearTimeout(typingTimeout);
         }
 
-        // Disable input while sending
         messageInput.disabled = true;
         const originalButtonText = sendButton.innerHTML;
         sendButton.innerHTML = '<div class="loading-spinner"></div>';
         sendButton.disabled = true;
-        
+
         try {
-            console.log('📤 Admin sending message to user:', targetUserId);
+            // Play send sound
+            playAdminSound('send');
             
-            // Send via Socket.IO
             socket.emit('send-message', {
                 content: content,
-                targetUserId: targetUserId
+                targetUserId: String(targetUserId)
             });
-            
-            // Clear input
             messageInput.value = '';
-            
-            // Reset character counter
             const charCountElement = document.getElementById('char-count');
             if (charCountElement) {
                 charCountElement.textContent = '0';
                 charCountElement.style.color = 'var(--text-muted)';
             }
-            
-            console.log('✅ Admin message sent via Socket.IO');
-            
         } catch (error) {
-            console.error('❌ Error sending message:', error);
+            console.error('Error sending message:', error);
             showNotification('Failed to send message', 'error');
-            
-            // Try HTTP fallback
-            try {
-                console.log('🔄 Trying HTTP fallback...');
-                const response = await fetch(`/chat/admin/reply/${targetUserId}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ content: content })
-                });
-                
-                if (response.ok) {
-                    console.log('✅ Message sent via HTTP');
-                } else {
-                    throw new Error('HTTP send failed');
-                }
-            } catch (httpError) {
-                console.error('❌ HTTP fallback also failed:', httpError);
-            }
         } finally {
-            // Re-enable input
             messageInput.disabled = false;
             sendButton.disabled = false;
             sendButton.innerHTML = originalButtonText;
@@ -658,7 +1125,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Enter key handling
     messageInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -666,59 +1132,239 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Auto-focus
     messageInput.focus();
 
-    // Polling fallback
-    function startPolling() {
-        console.log('🔄 Starting polling fallback for admin');
-        
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
-        }
-        
-        pollingInterval = setInterval(fetchMessages, 3000);
-    }
-    
-    async function fetchMessages() {
-        try {
-            console.log('📡 Admin polling for new messages...');
-            const response = await fetch(`/chat/api/messages?lastUpdate=${lastPollingUpdate}&userId=${targetUserId}`);
-            if (response.ok) {
-                const data = await response.json();
-                
-                if (data.messages && data.messages.length > 0) {
-                    console.log(`📩 Admin received ${data.messages.length} new messages via polling`);
-                    data.messages.forEach(handleNewMessage);
-                    lastPollingUpdate = new Date().toISOString();
-                }
+    // ===== CHECK VANISH TIMERS =====
+    function checkVanishTimers() {
+        const readMessages = document.querySelectorAll('.message-wrapper[data-is-read="true"]:not([data-vanished="true"])');
+        readMessages.forEach(function(element) {
+            const messageId = element.dataset.messageId;
+            if (!vanishQueue[messageId]) {
+                scheduleMessageVanish(messageId);
             }
-        } catch (error) {
-            console.error('❌ Admin polling error:', error);
-        }
+        });
     }
-    
-    // Clean up
-    window.addEventListener('beforeunload', () => {
-        // Send offline status
+
+    setInterval(checkVanishTimers, 2000);
+    setTimeout(scrollToBottom, 100);
+
+    window.addEventListener('beforeunload', function() {
         socket.emit('set-online-status', 'offline');
-        
-        // Stop typing if active
         if (isTyping) {
-            socket.emit('typing', { 
-                targetUserId: targetUserId, 
-                isTyping: false 
-            });
+            socket.emit('typing', { targetUserId: targetUserId, isTyping: false });
         }
-        
         socket.disconnect();
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
-        }
     });
 
-    // Initialize
-    setTimeout(scrollToBottom, 100);
-    
-});
+})();
 </script>
+
+<style>
+    .delete-message-btn {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 0 4px;
+        opacity: 0.3;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .delete-message-btn:hover {
+        opacity: 1;
+        color: var(--accent-red);
+        transform: scale(1.2);
+    }
+
+    .message-wrapper:hover .delete-message-btn {
+        opacity: 0.6;
+    }
+
+    .message-vanish-timer {
+        font-size: 0.6rem;
+        color: var(--text-muted);
+        margin-top: 4px;
+        opacity: 0.5;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        transition: all 0.3s ease;
+    }
+
+    .message-wrapper.message-read .message-vanish-timer {
+        opacity: 0.8;
+        color: #4CAF50;
+    }
+
+    .vanish-indicator {
+        font-size: 0.7rem;
+        transition: all 0.3s ease;
+    }
+
+    .vanish-countdown {
+        font-weight: bold;
+        color: #4CAF50;
+    }
+
+    .message-bubble {
+        position: relative;
+        transition: all 0.3s ease;
+    }
+
+    .message-status-pending {
+        color: #FF9800;
+        font-size: 0.6rem;
+        animation: pulse 1s infinite;
+        margin-left: 4px;
+    }
+
+    .message-status.read-status {
+        font-size: 0.8rem;
+        color: #4CAF50;
+        margin-top: 4px;
+        font-weight: bold;
+    }
+
+    .message-wrapper.message-read {
+        transition: all 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    }
+
+    .message-wrapper.message-read .message-bubble {
+        border-color: rgba(76, 175, 80, 0.2);
+    }
+
+    .loading-spinner {
+        width: 20px;
+        height: 20px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top: 2px solid white;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin: 0 auto;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 0.5; }
+        50% { opacity: 1; }
+    }
+
+    .no-messages {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-muted);
+    }
+
+    .no-messages-icon {
+        font-size: 3rem;
+        margin-bottom: 15px;
+    }
+
+    .no-messages-text {
+        font-size: 1.2rem;
+        color: var(--text-light);
+        margin-bottom: 8px;
+    }
+
+    .no-messages-hint {
+        font-size: 0.9rem;
+    }
+
+    .notification {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(17, 17, 17, 0.95);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .notification.error {
+        border-color: rgba(229, 57, 53, 0.3);
+        background: rgba(229, 57, 53, 0.1);
+    }
+
+    .notification-close {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        font-size: 1.2rem;
+        cursor: pointer;
+        padding: 0 4px;
+    }
+
+    .vanish-particle {
+        pointer-events: none;
+        position: fixed;
+        border-radius: 50%;
+        animation: particleFloat 0.8s ease-out forwards;
+    }
+
+    @keyframes particleFloat {
+        0% {
+            transform: scale(1) translate(0, 0);
+            opacity: 1;
+        }
+        100% {
+            transform: scale(0) translate(var(--tx), var(--ty));
+            opacity: 0;
+        }
+    }
+
+    /* TYPING INDICATOR - Positioned at bottom */
+    #typing-indicator-container {
+        width: 100%;
+    }
+    
+    #typing-indicator {
+        display: none;
+        padding: 10px 15px;
+        align-items: center;
+        gap: 10px;
+        background: rgba(17, 17, 17, 0.3);
+        border-radius: 12px;
+        margin: 5px 0;
+        width: fit-content;
+    }
+    
+    .typing-dots {
+        display: flex;
+        gap: 4px;
+    }
+    
+    .typing-dots span {
+        width: 8px;
+        height: 8px;
+        background: #9e9e9e;
+        border-radius: 50%;
+        animation: typingDot 1.4s infinite both;
+    }
+    
+    .typing-dots span:nth-child(1) { animation-delay: 0s; }
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+    
+    @keyframes typingDot {
+        0%, 60%, 100% { transform: translateY(0); }
+        30% { transform: translateY(-10px); }
+    }
+    
+    .typing-text {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+    }
+</style>

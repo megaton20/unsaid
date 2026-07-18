@@ -127,14 +127,15 @@ class chatServices {
     }
   }
 
-  // Admin: Delete message
-  static async deleteMessage(messageId) {
+  // Soft delete message (user can delete own, admin can delete any)
+  static async deleteMessage(messageId, userId, isAdmin = false) {
     try {
-      const message = await Message.deleteMessage(messageId);
+      const result = await Message.softDeleteMessage(messageId, userId, isAdmin);
       
       return {
-        success: true,
-        message: message
+        success: result.success,
+        message: result.message,
+        error: result.error
       };
     } catch (error) {
       console.error('Delete message service error:', error);
@@ -146,38 +147,80 @@ class chatServices {
     }
   }
 
-// Get new messages since last ID (for real-time)
-static async getNewMessages(sinceId, userId = null) {
-  try {
-    let query = `
-      SELECT 
-        m.*,
-        CASE 
-          WHEN m.is_from_admin = true THEN 'Admin'
-          ELSE COALESCE(u.username, 'You')
-        END as username
-      FROM messages m
-      LEFT JOIN users u ON m.user_id = u.id
-      WHERE m.id > $1 AND m.status = 'pending'
-    `;
-    
-    const params = [sinceId];
-    
-    if (userId) {
-      query += ` AND m.user_id = $2`;
-      params.push(userId);
+  // Mark message as vanished (soft delete)
+  static async markMessageAsVanished(messageId) {
+    try {
+      const message = await Message.markAsVanished(messageId);
+      
+      return {
+        success: true,
+        message: message
+      };
+    } catch (error) {
+      console.error('Mark message as vanished service error:', error);
+      return {
+        success: false,
+        error: 'Failed to mark message as vanished',
+        statusCode: 500
+      };
     }
-    
-    query += ` ORDER BY m.created_at ASC`;
-    
-    const pool = require('../config/db');
-    const res = await pool.query(query, params);
-    return res.rows;
-  } catch (error) {
-    console.log(`error getting messages since: ${error.message}`);
-    return [];
   }
-}
+
+  // Delete expired messages
+  static async deleteExpiredMessages(expiryDate) {
+    try {
+      const result = await Message.deleteExpiredMessages(expiryDate);
+      
+      return {
+        success: true,
+        deletedCount: result.deletedCount,
+        messages: result.messages
+      };
+    } catch (error) {
+      console.error('Delete expired messages service error:', error);
+      return {
+        success: false,
+        error: 'Failed to delete expired messages',
+        statusCode: 500
+      };
+    }
+  }
+
+  // Get new messages since last ID (for real-time)
+  static async getNewMessages(sinceId, userId = null) {
+    try {
+      let query = `
+        SELECT 
+          m.*,
+          CASE 
+            WHEN m.is_from_admin = true THEN 'Admin'
+            ELSE COALESCE(u.username, 'You')
+          END as username
+        FROM messages m
+        LEFT JOIN users u ON m.user_id = u.id
+        WHERE m.id > $1 
+          AND m.status = 'pending'
+          AND m.is_deleted = false
+      `;
+      
+      const params = [sinceId];
+      
+      if (userId) {
+        query += ` AND m.user_id = $2`;
+        params.push(userId);
+      }
+      
+      query += ` ORDER BY m.created_at ASC`;
+      
+      const pool = require('../config/db');
+      const res = await pool.query(query, params);
+      return res.rows;
+    } catch (error) {
+      console.log(`error getting messages since: ${error.message}`);
+      return [];
+    }
+  }
+
   // Get conversation updates for admin (real-time)
   static async getConversationUpdates(lastUpdate) {
     try {
@@ -206,133 +249,123 @@ static async getNewMessages(sinceId, userId = null) {
   }
 
   // Admin sends message to user
-static async sendAdminMessage(adminUserId, targetUserId, content) {
-  try {
-    const message = await Message.createAdminMessage(adminUserId, targetUserId, content);
-    
-    return {
-      success: true,
-      message: {
-        ...message,
-        username: 'Admin'
-      }
-    };
-  } catch (error) {
-    console.error('admin message service error:', error);
-    return {
-      success: false,
-      error: 'Failed to send message',
-      statusCode: 500
-    };
-  }
-}
-
-// Get conversation for user (includes both user and admin messages)
-static async getConversation(userId) {
-  try {
-    const messages = await Message.getConversation(userId);
-    
-    return {
-      success: true,
-      messages: messages || []
-    };
-  } catch (error) {
-    console.error('conversation service error:', error);
-    return {
-      success: false,
-      error: 'Failed to load conversation',
-      statusCode: 500
-      };
-  }
-}
-
-
-// Add these methods to your existing chatServices.js
-
-static async getAdminConversations(){
-  try {
-    const messages = await Message.getAdminConversations();
-    
-    return {
-      status: true,
-      messages: messages || []
-    };
-  } catch (error) {
-    console.error('conversation service error:', error);
-    return {
-      success: false,
-      error: 'Failed to load conversation',
-      statusCode: 500
-      };
-  }
-}
-
-static async getConversationUpdate(messageData) {
+  static async sendAdminMessage(adminUserId, targetUserId, content) {
     try {
-        const pool = require('../config/db');
-        // Get user info and message count
-        const query = `
-            SELECT 
-                u.id as user_id,
-                u.username,
-                COUNT(m.id) as message_count,
-                SUM(CASE WHEN m.is_read = false AND m.is_from_admin = false THEN 1 ELSE 0 END) as unread_count,
-                MAX(m.created_at) as last_message_at,
-                (
-                    SELECT content 
-                    FROM messages m2 
-                    WHERE m2.user_id = u.id 
-                    ORDER BY m2.created_at DESC 
-                    LIMIT 1
-                ) as last_message
-            FROM users u
-            LEFT JOIN messages m ON m.user_id = u.id
-            WHERE u.id = $1
-            GROUP BY u.id, u.username
-        `;
-        
-        const result = await pool.query(query, [messageData.user_id]);
-        
-        if (result.rows.length === 0) {
-            // Return basic conversation data if user not found
-            return {
-                user_id: messageData.user_id,
-                username: messageData.username || 'Anonymous User',
-                last_message: messageData.content,
-                last_message_at: messageData.created_at,
-                unread_count: messageData.is_from_admin ? 0 : 1,
-                message_count: 1
-            };
+      const message = await Message.createAdminMessage(adminUserId, targetUserId, content);
+      
+      return {
+        success: true,
+        message: {
+          ...message,
+          username: 'Admin'
         }
-        
-        const row = result.rows[0];
+      };
+    } catch (error) {
+      console.error('admin message service error:', error);
+      return {
+        success: false,
+        error: 'Failed to send message',
+        statusCode: 500
+      };
+    }
+  }
 
-        console.log(row);
+  // Get conversation for user (includes both user and admin messages)
+  static async getConversation(userId) {
+    try {
+      const messages = await Message.getConversationExcludingDeleted(userId);
+      
+      return {
+        success: true,
+        messages: messages || []
+      };
+    } catch (error) {
+      console.error('conversation service error:', error);
+      return {
+        success: false,
+        error: 'Failed to load conversation',
+        statusCode: 500
+      };
+    }
+  }
+
+  // Get admin conversations
+  static async getAdminConversations() {
+    try {
+      const messages = await Message.getAdminConversations();
+      
+      return {
+        status: true,
+        messages: messages || []
+      };
+    } catch (error) {
+      console.error('conversation service error:', error);
+      return {
+        success: false,
+        error: 'Failed to load conversation',
+        statusCode: 500
+      };
+    }
+  }
+
+  // Add these methods to chatServices.js
+
+// Mark message as read (using existing method)
+static async markMessageAsRead(messageId) {
+    try {
+        const message = await Message.markAsRead(messageId);
         
         return {
-            user_id: row.user_id,
-            username: row.username || 'Anonymous User',
-            last_message: messageData.content,
-            last_message_at: messageData.created_at,
-            unread_count: messageData.is_from_admin ? 0 : (row.unread_count || 1),
-            message_count: row.message_count || 1
+            success: true,
+            message: message
         };
     } catch (error) {
-        console.error('Error getting conversation update:', error);
-        // Return basic data if query fails
+        console.error('Mark as read service error:', error);
         return {
-            user_id: messageData.user_id,
-            username: messageData.username || 'Anonymous User',
-            last_message: messageData.content,
-            last_message_at: messageData.created_at,
-            unread_count: messageData.is_from_admin ? 0 : 1,
-            message_count: 1
+            success: false,
+            error: 'Failed to mark message as read',
+            statusCode: 500
         };
     }
 }
 
+// Mark all messages from user as read
+static async markAllAsRead(userId) {
+    try {
+        const messages = await Message.markAllAsRead(userId);
+        
+        return {
+            success: true,
+            messages: messages
+        };
+    } catch (error) {
+        console.error('Mark all as read service error:', error);
+        return {
+            success: false,
+            error: 'Failed to mark messages as read',
+            statusCode: 500
+        };
+    }
+}
 
-
+// Mark message as vanished
+static async markMessageAsVanished(messageId) {
+    try {
+        const message = await Message.markAsVanished(messageId);
+        
+        return {
+            success: true,
+            message: message
+        };
+    } catch (error) {
+        console.error('Mark message as vanished service error:', error);
+        return {
+            success: false,
+            error: 'Failed to mark message as vanished',
+            statusCode: 500
+        };
+    }
+}
 }
 
 module.exports = chatServices;

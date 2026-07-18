@@ -10,6 +10,8 @@ const passport = require('passport');
 const path = require('path');
 const http = require('http');
 const socketIo = require('socket.io');
+const chatServices = require('./services/chatServices');
+
 
 const initAllModels = require('./initAllModels');
 initAllModels();
@@ -21,7 +23,7 @@ app.set('view engine', 'ejs');
 app.use(ejsLayouts);
 app.use(express.static(path.join(__dirname, './', 'public')));
 
-// ===== MIDDLEWARE SETUP =====
+// ===== MIDDLEWARE SETUP =====|
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
@@ -29,7 +31,7 @@ app.use(express.urlencoded({ extended: true }));
 // ===== SESSION SETUP =====
 // Determine if we're in production or development
 const isProduction = process.env.NODE_ENV === 'production';
-console.log(`🌍 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
+console.log(`Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
 
 const sessionMiddleware = session({
     secret: process.env.SESSION_SECRET || 'your-secret-key-change-this-in-production',
@@ -68,6 +70,41 @@ app.use((req, res, next) => {
     req.isAPI = req.originalUrl.startsWith("/api");
     next();
 });
+
+
+
+
+// Message expiry configuration
+const MESSAGE_EXPIRY_HOURS = process.env.MESSAGE_EXPIRY_HOURS || 24; // Default 24 hours
+const MESSAGE_CLEANUP_INTERVAL = 60 * 60 * 1000; // Check every hour
+
+// Function to clean up expired messages
+async function cleanupExpiredMessages() {
+    try {
+        const expiryDate = new Date(Date.now() - (MESSAGE_EXPIRY_HOURS * 60 * 60 * 1000));
+        console.log(` Cleaning up messages older than: ${expiryDate.toISOString()}`);
+
+        const result = await chatServices.deleteExpiredMessages(expiryDate);
+
+        if (result.success && result.deletedCount > 0) {
+            console.log(` Cleaned up ${result.deletedCount} expired messages`);
+
+            // Notify all clients about expired messages
+            io.emit('messages-expired', {
+                timestamp: new Date().toISOString(),
+                count: result.deletedCount
+            });
+        }
+    } catch (error) {
+        console.error('Error cleaning up expired messages:', error);
+    }
+}
+
+// Run cleanup every hour
+setInterval(cleanupExpiredMessages, MESSAGE_CLEANUP_INTERVAL);
+
+// Also run on startup (after a short delay)
+setTimeout(cleanupExpiredMessages, 5000);
 
 // ===== SERVER & SOCKET.IO SETUP =====
 const server = http.createServer(app);
@@ -108,7 +145,7 @@ if (isProduction) {
     };
 } else {
     // Development settings
-    console.log('🔧 Development mode - Allowing all origins');
+    console.log('Development mode - Allowing all origins');
     corsOptions = {
         origin: true, // Reflect the request origin
         credentials: true,
@@ -154,7 +191,7 @@ io.use((socket, next) => {
         return next();
     }
 
-    console.log('🍪 Found session cookie, attempting authentication...');
+    console.log(' Found session cookie, attempting authentication...');
 
     // Use session middleware to restore session
     sessionMiddleware(socket.request, {}, (err) => {
@@ -207,7 +244,6 @@ io.use((socket, next) => {
 
 // ===== SOCKET.IO EVENT HANDLERS =====
 io.on('connection', (socket) => {
-    console.log(`🔗 New connection: ${socket.username} (${socket.userId}, ${socket.role})`);
 
     // Join appropriate rooms
     if (socket.userId !== 'anonymous') {
@@ -215,14 +251,12 @@ io.on('connection', (socket) => {
 
         if (socket.role === 'admin') {
             socket.join('admin-room');
-            console.log(`👑 Admin joined admin-room: ${socket.username}`);
-
             // Broadcast admin online status
             socket.broadcast.emit('admin-status', {
                 status: 'online',
                 username: socket.username
             });
-            
+
             // Send initial conversations to admin
             sendAdminConversations(socket);
         } else {
@@ -278,16 +312,15 @@ io.on('connection', (socket) => {
             }
 
             // Save message to database
-            const chatServices = require('./services/chatServices');
             let result;
 
             if (socket.role === 'admin') {
                 // Admin sending to user
-                console.log(`👑 Admin ${socket.userId} → User ${targetUserId}`);
+                console.log(`Unsaid ${socket.userId} → User: ${targetUserId}`);
                 result = await chatServices.sendAdminMessage(socket.userId, targetUserId, content);
             } else {
                 // User sending to admin
-                console.log(`👤 User ${socket.userId} → Admin`);
+                console.log(`User ${socket.userId} → Unsaid`);
                 result = await chatServices.sendMessage(socket.userId, content);
             }
 
@@ -318,26 +351,187 @@ io.on('connection', (socket) => {
 
                 // Update admin inbox
                 updateAdminInboxForNewMessage(messageData, true);
-                
-                console.log(`📤 Admin → User ${targetUserId}`);
+
+                console.log(`Unsaid → User ${targetUserId}`);
             } else {
-                // User -> Admin
-                io.to('admin-room').emit('new-user-message', {
+                // User -> Admin - Emit to admin room with consistent event name
+                io.to('admin-room').emit('new-message', {
                     ...messageData,
-                    username: socket.username
+                    username: socket.username,
+                    is_from_admin: false
                 });
+
                 // User sees their own message
-                socket.emit('new-message', { ...messageData, username: 'You' });
+                socket.emit('new-message', {
+                    ...messageData,
+                    username: 'You',
+                    is_from_admin: false
+                });
 
                 // Update admin inbox
                 updateAdminInboxForNewMessage(messageData, false);
-                
-                console.log(`📤 User ${socket.username} → Admin`);
+
+                console.log(`User ${socket.username} → Unsaid`);
             }
 
         } catch (error) {
             console.error(' Message send error:', error);
             socket.emit('error', { message: 'Failed to send message: ' + error.message });
+        }
+    });
+    // Delete message event
+    socket.on('delete-message', async (data) => {
+        try {
+            const { messageId } = data;
+
+            // Check if user is authorized to delete
+            const isAdmin = socket.role === 'admin';
+            const userId = socket.userId;
+
+            if (!userId || userId === 'anonymous') {
+                return socket.emit('error', { message: 'Please login to delete messages' });
+            }
+
+            const result = await chatServices.deleteMessage(messageId, userId, isAdmin);
+
+            if (result.success) {
+                // Get the message details to notify the correct user
+                const pool = require('./config/db');
+                const msgRes = await pool.query(
+                    'SELECT user_id FROM messages WHERE id = $1',
+                    [messageId]
+                );
+
+                if (msgRes.rows.length > 0) {
+                    const targetUserId = msgRes.rows[0].user_id;
+
+                    // Notify all relevant clients
+                    io.to(`user:${targetUserId}`).emit('message-deleted', {
+                        messageId: messageId,
+                        userId: targetUserId
+                    });
+
+                    // Also notify admin room if admin deleted it
+                    if (isAdmin) {
+                        io.to('admin-room').emit('message-deleted', {
+                            messageId: messageId,
+                            userId: targetUserId
+                        });
+                    }
+                }
+
+                socket.emit('message-deleted', {
+                    messageId: messageId,
+                    userId: userId
+                });
+            } else {
+                socket.emit('error', { message: result.error || 'Failed to delete message' });
+            }
+        } catch (error) {
+            console.error('Delete message error:', error);
+            socket.emit('error', { message: 'Failed to delete message' });
+        }
+    });
+
+
+    // Mark message as read
+    socket.on('mark-message-read', async (data) => {
+        try {
+            const { messageId } = data;
+
+            // Use the existing markAsRead method
+            const result = await chatServices.markMessageAsRead(messageId);
+
+            if (result.success) {
+                const message = result.message;
+
+                // Get the message to find the user
+                const pool = require('./config/db');
+                const msgRes = await pool.query(
+                    'SELECT user_id FROM messages WHERE id = $1',
+                    [messageId]
+                );
+
+                if (msgRes.rows.length > 0) {
+                    const userId = msgRes.rows[0].user_id;
+
+                    // Notify the user that their message was read
+                    io.to(`user:${userId}`).emit('message-read', {
+                        messageId: messageId,
+                        readAt: message.read_at || new Date().toISOString()
+                    });
+
+                    // Also notify admin room
+                    io.to('admin-room').emit('message-read', {
+                        messageId: messageId,
+                        readAt: message.read_at || new Date().toISOString()
+                    });
+                }
+
+                console.log(` Message ${messageId} marked as read`);
+            } else {
+                console.error(` Failed to mark message ${messageId} as read:`, result.error);
+            }
+        } catch (error) {
+            console.error('Mark message read error:', error);
+            socket.emit('error', { message: 'Failed to mark message as read' });
+        }
+    });
+
+    // Admin marks all messages from a user as read
+    socket.on('mark-all-read', async (data) => {
+        try {
+            const { userId } = data;
+
+            // Mark all messages from this user as read
+            const result = await chatServices.markAllAsRead(userId);
+
+            if (result.success) {
+                console.log(` All messages from user ${userId} marked as read by admin`);
+
+                // Notify the user that their messages were read
+                io.to(`user:${userId}`).emit('all-messages-read', {
+                    userId: userId,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Notify admin room
+                io.to('admin-room').emit('all-messages-read', {
+                    userId: userId,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        } catch (error) {
+            console.error('Mark all read error:', error);
+        }
+    });
+
+    // Message vanished
+    socket.on('message-vanished', async (data) => {
+        try {
+            const { messageId } = data;
+
+            // Mark as vanished in database
+            await chatServices.markMessageAsVanished(messageId);
+
+            // Notify all clients in the conversation
+            const pool = require('./config/db');
+            const msgRes = await pool.query(
+                'SELECT user_id FROM messages WHERE id = $1',
+                [messageId]
+            );
+
+            if (msgRes.rows.length > 0) {
+                const userId = msgRes.rows[0].user_id;
+                io.to(`user:${userId}`).emit('message-vanished', {
+                    messageId: messageId
+                });
+                io.to('admin-room').emit('message-vanished', {
+                    messageId: messageId
+                });
+            }
+        } catch (error) {
+            console.error('Message vanished error:', error);
         }
     });
 
@@ -351,10 +545,6 @@ io.on('connection', (socket) => {
     // ===== TYPING INDICATOR =====
     socket.on('typing', (data) => {
         const { targetUserId, isTyping, userId } = data;
-
-        // Determine who is typing
-        const typingUserId = userId || socket.userId;
-        const typingUsername = socket.role === 'admin' ? 'Admin' : socket.username;
 
         if (socket.role === 'admin' && targetUserId) {
             // Admin typing to user
@@ -374,7 +564,73 @@ io.on('connection', (socket) => {
             });
         }
     });
+    // In app.js - Update the socket event handler
 
+    // Message vanished - update database
+    socket.on('message-vanished', async (data) => {
+        try {
+            const { messageId } = data;
+
+            // Mark as vanished in database
+            const result = await chatServices.markMessageAsVanished(messageId);
+
+            if (result.success) {
+                console.log(` Message ${messageId} marked as vanished in database`);
+
+                // Notify all clients in the conversation
+                const pool = require('./config/db');
+                const msgRes = await pool.query(
+                    'SELECT user_id FROM messages WHERE id = $1',
+                    [messageId]
+                );
+
+                if (msgRes.rows.length > 0) {
+                    const userId = msgRes.rows[0].user_id;
+                    io.to(`user:${userId}`).emit('message-vanished', {
+                        messageId: messageId
+                    });
+                    io.to('admin-room').emit('message-vanished', {
+                        messageId: messageId
+                    });
+                }
+            } else {
+                console.error(` Failed to mark message ${messageId} as vanished:`, result.error);
+            }
+        } catch (error) {
+            console.error('Message vanished error:', error);
+        }
+    });
+
+    // Also add periodic cleanup for expired messages
+    const MESSAGE_EXPIRY_HOURS = 24; // Or whatever you want
+    const MESSAGE_CLEANUP_INTERVAL = 60 * 60 * 1000; // Every hour
+
+    async function cleanupExpiredMessages() {
+        try {
+            const expiryDate = new Date(Date.now() - (MESSAGE_EXPIRY_HOURS * 60 * 60 * 1000));
+            console.log(`🧹 Cleaning up messages older than: ${expiryDate.toISOString()}`);
+
+            const result = await chatServices.deleteExpiredMessages(expiryDate);
+
+            if (result.success && result.deletedCount > 0) {
+                console.log(`🧹 Cleaned up ${result.deletedCount} expired messages`);
+
+                // Notify all clients about expired messages
+                io.emit('messages-expired', {
+                    timestamp: new Date().toISOString(),
+                    count: result.deletedCount
+                });
+            }
+        } catch (error) {
+            console.error('Error cleaning up expired messages:', error);
+        }
+    }
+
+    // Run cleanup every hour
+    setInterval(cleanupExpiredMessages, MESSAGE_CLEANUP_INTERVAL);
+
+    // Also run on startup
+    setTimeout(cleanupExpiredMessages, 5000);
     // ===== MARK AS READ =====
     socket.on('mark-as-read', async (data) => {
         try {
@@ -453,6 +709,7 @@ async function sendAdminConversations(socket) {
             success: true,
             conversations: result.messages || []
         });
+
     } catch (error) {
         console.error('Error sending conversations to admin:', error);
         socket.emit('conversations-list', {
@@ -465,8 +722,6 @@ async function sendAdminConversations(socket) {
 // Update admin inbox when new message arrives
 async function updateAdminInboxForNewMessage(messageData, isFromAdmin) {
     try {
-        const chatServices = require('./services/chatServices');
-        
         // Get updated conversation data
         const conversationUpdate = {
             user_id: messageData.user_id,
@@ -478,8 +733,7 @@ async function updateAdminInboxForNewMessage(messageData, isFromAdmin) {
 
         // Send to all admins
         io.to('admin-room').emit('conversation-updated', conversationUpdate);
-        
-        console.log(`📬 Updated admin inbox for user ${messageData.user_id}`);
+
     } catch (error) {
         console.error('Error updating admin inbox:', error);
     }
@@ -519,8 +773,6 @@ app.get('/chat/api/messages', async (req, res) => {
         res.json({ messages: [] });
     }
 });
-
-
 
 // ===== ERROR HANDLING =====
 // 404 Handler
