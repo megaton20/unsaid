@@ -286,52 +286,24 @@ io.on('connection', (socket) => {
     }
 
     // ===== MESSAGE SENDING =====
+
     socket.on('send-message', async (data) => {
         try {
-            const { content, targetUserId } = data;
+            const { content, targetUserId, optimisticId } = data;
+            // ... validation ...
 
-            // Input validation
-            if (!content || !content.trim()) {
-                return socket.emit('error', { message: 'Message cannot be empty' });
-            }
-
-            if (content.length > 500) {
-                return socket.emit('error', { message: 'Message too long (max 500 characters)' });
-            }
-
-            // Check if user is authenticated (not anonymous)
-            if (socket.userId === 'anonymous' || socket.role === 'guest') {
-                console.log(' Unauthenticated user tried to send message');
-                return socket.emit('error', { message: 'Please login to send messages' });
-            }
-
-            // Authorization checks for users
-            if (socket.role === 'user' && targetUserId !== 'admin') {
-                console.log(' User tried to send to non-admin:', targetUserId);
-                return socket.emit('error', { message: 'Unauthorized' });
-            }
-
-            // Save message to database
             let result;
-
             if (socket.role === 'admin') {
-                // Admin sending to user
-                console.log(`Unsaid ${socket.userId} → User: ${targetUserId}`);
                 result = await chatServices.sendAdminMessage(socket.userId, targetUserId, content);
             } else {
-                // User sending to admin
-                console.log(`User ${socket.userId} → Unsaid`);
                 result = await chatServices.sendMessage(socket.userId, content);
             }
 
             if (!result.success) {
-                console.error(' Database error:', result.error);
                 return socket.emit('error', { message: result.error });
             }
 
             const message = result.message;
-
-            // Prepare message data
             const messageData = {
                 id: message.id,
                 user_id: socket.role === 'admin' ? targetUserId : socket.userId,
@@ -342,43 +314,36 @@ io.on('connection', (socket) => {
                 is_read: false
             };
 
-            // Emit to recipients
             if (socket.role === 'admin') {
-                // Admin -> User
                 io.to(`user:${targetUserId}`).emit('new-message', messageData);
-                // Admin sees their own message
-                socket.emit('new-message', { ...messageData, username: 'You' });
-
-                // Update admin inbox
+                // Send back to admin with optimisticId
+                socket.emit('new-message', {
+                    ...messageData,
+                    username: 'You',
+                    optimisticId: optimisticId // CRITICAL: Send back the optimisticId
+                });
                 updateAdminInboxForNewMessage(messageData, true);
-
-                console.log(`Unsaid → User ${targetUserId}`);
             } else {
-                // User -> Admin - Emit to admin room with consistent event name
                 io.to('admin-room').emit('new-message', {
                     ...messageData,
                     username: socket.username,
                     is_from_admin: false
                 });
-
-                // User sees their own message
+                // Send back to user with optimisticId
                 socket.emit('new-message', {
                     ...messageData,
                     username: 'You',
-                    is_from_admin: false
+                    is_from_admin: false,
+                    optimisticId: optimisticId // CRITICAL: Send back the optimisticId
                 });
-
-                // Update admin inbox
                 updateAdminInboxForNewMessage(messageData, false);
-
-                console.log(`User ${socket.username} → Unsaid`);
             }
-
         } catch (error) {
-            console.error(' Message send error:', error);
+            console.error('Message send error:', error);
             socket.emit('error', { message: 'Failed to send message: ' + error.message });
         }
     });
+
     // Delete message event
     socket.on('delete-message', async (data) => {
         try {

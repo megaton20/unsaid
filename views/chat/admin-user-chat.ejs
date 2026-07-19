@@ -188,8 +188,9 @@
     }
 
     const vanishQueue = {};
+    const pendingMessages = {};
 
-    // ===== ADMIN AUDIO SYSTEM - Custom Sound with Fallback =====
+    // ===== ADMIN AUDIO SYSTEM - Same as user side =====
     let adminAudioContext = null;
     let adminVanishBuffer = null;
     let adminSendBuffer = null;
@@ -217,13 +218,22 @@
     async function loadAdminSound(type) {
         const soundPaths = {
             'vanish': [
-                '/audio/vanish.mp3', '/audio/vanish.wav'
+                '/audio/vanish.mp3', '/audio/vanish.wav',
+                '/audio/notification.mp3', '/audio/notification.wav',
+                '/vanish.mp3', '/vanish.wav',
+                '/sounds/vanish.mp3', '/sounds/vanish.wav'
             ],
             'send': [
-                '/audio/send.mp3', '/audio/send.wav'
+                '/audio/send.mp3', '/audio/send.wav',
+                '/audio/outgoing.mp3', '/audio/outgoing.wav',
+                '/send.mp3', '/send.wav',
+                '/sounds/send.mp3', '/sounds/send.wav'
             ],
             'receive': [
-                '/audio/receive.mp3', '/audio/receive.wav'
+                '/audio/receive.mp3', '/audio/receive.wav',
+                '/audio/incoming.mp3', '/audio/incoming.wav',
+                '/receive.mp3', '/receive.wav',
+                '/sounds/receive.mp3', '/sounds/receive.wav'
             ]
         };
 
@@ -329,7 +339,6 @@
             if (adminAudioContext.state === 'suspended') {
                 adminAudioContext.resume().catch(function(e) {
                     console.log(' Could not resume admin audio context:', e);
-                    playAdminHtml5Fallback(type);
                     return;
                 });
             }
@@ -348,39 +357,7 @@
             
         } catch (e) {
             console.log('Could not play admin ' + type + ' sound:', e);
-            playAdminHtml5Fallback(type);
         }
-    }
-
-    function playAdminHtml5Fallback(type) {
-        try {
-            const soundPaths = {
-                'vanish': [
-                    '/audio/vanish.mp3', '/audio/vanish.wav'
-                ],
-                'send': [
-                    '/audio/send.mp3', '/audio/send.wav'
-                ],
-                'receive': [
-                    '/audio/receive.mp3', '/audio/receive.wav'
-                ]
-            };
-            
-            const paths = soundPaths[type] || [];
-            let audioPlayed = false;
-            
-            for (const path of paths) {
-                try {
-                    const audio = new Audio(path);
-                    audio.volume = 0.3;
-                    audio.play().then(function() {
-                        console.log('🔊 Admin ' + type + ' sound played (HTML5 fallback):', path);
-                        audioPlayed = true;
-                    }).catch(function(e) {});
-                    if (audioPlayed) break;
-                } catch (e) {}
-            }
-        } catch (e) {}
     }
 
     function enableAdminSound() {
@@ -482,8 +459,21 @@
 
     socket.on('new-message', function(message) {
         console.log(' New message received:', message);
+        
+        // Check if this is a response to a pending message
+        if (message.optimisticId && pendingMessages[message.optimisticId]) {
+            replacePendingMessage(message.optimisticId, message);
+            return;
+        }
+        
+        // Check if from wrong user
         if (String(message.user_id) !== String(targetUserId)) return;
-        if (document.querySelector('[data-message-id="' + message.id + '"]')) return;
+        
+        // Check for duplicates
+        if (document.querySelector('[data-message-id="' + message.id + '"]')) {
+            console.log('⚠️ Message already exists, skipping');
+            return;
+        }
         
         // Play receive sound
         playAdminSound('receive');
@@ -521,6 +511,39 @@
         showNotification(error.message || 'An error occurred', 'error');
     });
 
+    // ===== REPLACE PENDING MESSAGE =====
+    function replacePendingMessage(optimisticId, realMessage) {
+        console.log('🔄 Replacing pending admin message:', optimisticId, 'with:', realMessage.id);
+        
+        const pendingElement = document.querySelector('[data-optimistic-id="' + optimisticId + '"]');
+        if (!pendingElement) {
+            console.log('⚠️ Pending element not found');
+            return;
+        }
+        
+        delete pendingMessages[optimisticId];
+        
+        const parent = pendingElement.parentNode;
+        const nextSibling = pendingElement.nextSibling;
+        pendingElement.remove();
+        
+        const realElement = createMessageElement(realMessage);
+        
+        if (nextSibling) {
+            parent.insertBefore(realElement, nextSibling);
+        } else {
+            parent.appendChild(realElement);
+        }
+        
+        if (realMessage.is_read && realMessage.read_at) {
+            setTimeout(function() {
+                scheduleMessageVanish(realMessage.id);
+            }, 500);
+        }
+        
+        scrollToBottom();
+    }
+
     // ===== VANISH SYSTEM =====
     function scheduleMessageVanish(messageId) {
         const messageElement = document.querySelector('[data-message-id="' + messageId + '"]');
@@ -554,8 +577,6 @@
             vanishMessage(messageId);
             return;
         }
-
-        console.log('Message ' + messageId + ' will vanish in ' + remaining.toFixed(1) + 's (total: ' + vanishSeconds + 's)');
 
         let remainingTime = remaining;
         const countdownInterval = setInterval(function() {
@@ -735,14 +756,17 @@
         }
     }
 
+    // ===== CREATE MESSAGE ELEMENT =====
     function createMessageElement(message) {
         const isFromAdmin = message.is_from_admin;
         const isRead = message.is_read || false;
+        const isPending = message.is_pending || false;
         const contentLength = message.content ? message.content.length : 0;
         const vanishSeconds = Math.min(300, Math.max(60, 60 + Math.floor(contentLength / 3)));
         
         const messageWrapper = document.createElement('div');
-        messageWrapper.className = 'message-wrapper ' + (isFromAdmin ? 'message-right' : 'message-left') + (isRead ? ' message-read' : '');
+        const statusClass = isPending ? (message.status === 'failed' ? ' message-failed' : ' message-pending') : '';
+        messageWrapper.className = 'message-wrapper ' + (isFromAdmin ? 'message-right' : 'message-left') + (isRead ? ' message-read' : '') + statusClass;
         messageWrapper.dataset.messageId = message.id;
         messageWrapper.dataset.timestamp = new Date(message.created_at).getTime();
         messageWrapper.dataset.userId = message.user_id;
@@ -751,6 +775,11 @@
         messageWrapper.dataset.vanished = 'false';
         messageWrapper.dataset.fromAdmin = isFromAdmin ? 'true' : 'false';
         messageWrapper.dataset.vanishSeconds = vanishSeconds;
+        messageWrapper.dataset.isPending = isPending ? 'true' : 'false';
+        
+        if (message.optimisticId) {
+            messageWrapper.dataset.optimisticId = message.optimisticId;
+        }
 
         const time = new Date(message.created_at);
         const formattedTime = time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
@@ -765,11 +794,26 @@
         let messageHTML = '';
 
         if (isFromAdmin) {
+            let statusIndicator = '';
+            if (isPending) {
+                if (message.status === 'sending') {
+                    statusIndicator = '<span class="message-status-sending">⟳ Sending...</span>';
+                } else if (message.status === 'failed') {
+                    statusIndicator = '<span class="message-status-failed">✗ Failed</span>';
+                }
+            } else {
+                statusIndicator = '<span class="message-status-sent">✓ Sent</span>';
+            }
+            
+            const retryButton = (message.status === 'failed') ? 
+                '<button class="retry-message-btn" data-optimistic-id="' + message.optimisticId + '" data-content="' + escapeHtml(message.content) + '">↻ Retry</button>' : '';
+            
             messageHTML = 
                 '<div class="message-content-wrapper">' +
                     '<div class="message-meta">' +
                         '<span class="message-username">' + escapeHtml(username) + '</span>' +
                         '<span class="message-time">' + formattedTime + '</span>' +
+                        statusIndicator +
                     '</div>' +
                     '<div class="message-bubble admin-bubble">' +
                         '<div class="message-text">' + escapeHtml(message.content) + '</div>' +
@@ -783,6 +827,7 @@
                     '<div class="avatar-circle-small admin-avatar">' +
                         '<span class="avatar-text-small">A</span>' +
                     '</div>' +
+                    retryButton +
                 '</div>';
         } else {
             messageHTML = 
@@ -809,6 +854,22 @@
 
         messageWrapper.innerHTML = messageHTML;
 
+        // Retry button handler
+        const retryBtn = messageWrapper.querySelector('.retry-message-btn');
+        if (retryBtn) {
+            retryBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const optimisticId = this.dataset.optimisticId;
+                const content = this.dataset.content;
+                const parent = this.closest('.message-wrapper');
+                if (parent) {
+                    parent.remove();
+                }
+                delete pendingMessages[optimisticId];
+                sendAdminMessageOptimistic(content);
+            });
+        }
+
         messageWrapper.style.opacity = '0';
         messageWrapper.style.transform = isFromAdmin ? 'translateX(20px)' : 'translateX(-20px)';
         setTimeout(function() {
@@ -817,7 +878,7 @@
             messageWrapper.style.transform = 'translateX(0)';
         }, 10);
 
-        if (isRead && message.read_at) {
+        if (isRead && message.read_at && !isPending) {
             setTimeout(function() {
                 scheduleMessageVanish(message.id);
             }, 500);
@@ -868,6 +929,95 @@
         setTimeout(function() {
             scheduleMessageVanish(messageId);
         }, 500);
+    }
+
+    // ===== CREATE OPTIMISTIC ADMIN MESSAGE =====
+    function createOptimisticAdminMessage(content) {
+        const optimisticId = 'pending_admin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const now = new Date();
+        
+        return {
+            id: optimisticId,
+            user_id: currentUserId,
+            content: content,
+            is_from_admin: true,
+            username: 'You',
+            created_at: now.toISOString(),
+            is_read: true,
+            read_at: now.toISOString(),
+            is_deleted: false,
+            is_pending: true,
+            optimisticId: optimisticId,
+            status: 'sending'
+        };
+    }
+
+    // ===== OPTIMISTIC SEND ADMIN MESSAGE =====
+    function sendAdminMessageOptimistic(content) {
+        const optimisticMessage = createOptimisticAdminMessage(content);
+        const optimisticId = optimisticMessage.optimisticId;
+        
+        pendingMessages[optimisticId] = optimisticMessage;
+        
+        const noMessages = document.querySelector('.no-messages');
+        if (noMessages) noMessages.remove();
+        
+        const messageElement = createMessageElement(optimisticMessage);
+        const existingMessages = document.querySelectorAll('.message-wrapper');
+        
+        if (existingMessages.length === 0) {
+            messagesContainer.insertBefore(messageElement, scrollAnchor);
+        } else {
+            messagesContainer.insertBefore(messageElement, scrollAnchor);
+        }
+        
+        scrollToBottom();
+        playAdminSound('send');
+        
+        socket.emit('send-message', {
+            content: content,
+            targetUserId: String(targetUserId),
+            optimisticId: optimisticId
+        });
+        
+        // Timeout for failed messages
+        const timeoutId = setTimeout(function() {
+            if (pendingMessages[optimisticId]) {
+                const element = document.querySelector('[data-optimistic-id="' + optimisticId + '"]');
+                if (element) {
+                    pendingMessages[optimisticId].status = 'failed';
+                    const indicator = element.querySelector('.message-status-sending');
+                    if (indicator) {
+                        indicator.className = 'message-status-failed';
+                        indicator.textContent = '✗ Failed';
+                    }
+                    element.classList.add('message-failed');
+                    
+                    if (!element.querySelector('.retry-message-btn')) {
+                        const retryBtn = document.createElement('button');
+                        retryBtn.className = 'retry-message-btn';
+                        retryBtn.dataset.optimisticId = optimisticId;
+                        retryBtn.dataset.content = content;
+                        retryBtn.textContent = '↻ Retry';
+                        const avatarRight = element.querySelector('.message-avatar-right');
+                        if (avatarRight) {
+                            avatarRight.appendChild(retryBtn);
+                        }
+                        retryBtn.addEventListener('click', function(e) {
+                            e.stopPropagation();
+                            const parent = this.closest('.message-wrapper');
+                            if (parent) {
+                                parent.remove();
+                            }
+                            delete pendingMessages[optimisticId];
+                            sendAdminMessageOptimistic(content);
+                        });
+                    }
+                }
+            }
+        }, 10000);
+        
+        pendingMessages[optimisticId]._timeout = timeoutId;
     }
 
     // ===== UTILITY FUNCTIONS =====
@@ -1061,7 +1211,7 @@
         }
     });
 
-    // ===== FORM SUBMISSION =====
+    // ===== FORM SUBMISSION - OPTIMISTIC =====
     messageForm.addEventListener('submit', function(e) {
         e.preventDefault();
         const content = messageInput.value.trim();
@@ -1080,34 +1230,14 @@
             clearTimeout(typingTimeout);
         }
 
-        messageInput.disabled = true;
-        const originalButtonText = sendButton.innerHTML;
-        sendButton.innerHTML = '<div class="loading-spinner"></div>';
-        sendButton.disabled = true;
-
-        try {
-            // Play send sound
-            playAdminSound('send');
-            
-            socket.emit('send-message', {
-                content: content,
-                targetUserId: String(targetUserId)
-            });
-            messageInput.value = '';
-            const charCountElement = document.getElementById('char-count');
-            if (charCountElement) {
-                charCountElement.textContent = '0';
-                charCountElement.style.color = 'var(--text-muted)';
-            }
-        } catch (error) {
-            console.error('Error sending message:', error);
-            showNotification('Failed to send message', 'error');
-        } finally {
-            messageInput.disabled = false;
-            sendButton.disabled = false;
-            sendButton.innerHTML = originalButtonText;
-            messageInput.focus();
+        messageInput.value = '';
+        const charCountElement = document.getElementById('char-count');
+        if (charCountElement) {
+            charCountElement.textContent = '0';
+            charCountElement.style.color = 'var(--text-muted)';
         }
+        
+        sendAdminMessageOptimistic(content);
     });
 
     messageInput.addEventListener('keydown', function(e) {
@@ -1210,6 +1340,63 @@
         color: #4CAF50;
         margin-top: 4px;
         font-weight: bold;
+    }
+
+    /* Status indicators for optimistic UI */
+    .message-status-sending {
+        font-size: 0.6rem;
+        color: #FF9800;
+        margin-left: 4px;
+        animation: pulse 1s infinite;
+    }
+
+    .message-status-sent {
+        font-size: 0.6rem;
+        color: #4CAF50;
+        margin-left: 4px;
+    }
+
+    .message-status-failed {
+        font-size: 0.6rem;
+        color: #e74c3c;
+        margin-left: 4px;
+        font-weight: bold;
+    }
+
+    .message-wrapper.message-pending {
+        opacity: 0.9;
+    }
+
+    .message-wrapper.message-pending .message-bubble {
+        border-color: rgba(255, 152, 0, 0.3);
+    }
+
+    .message-wrapper.message-failed {
+        opacity: 0.8;
+    }
+
+    .message-wrapper.message-failed .message-bubble {
+        border-color: rgba(231, 76, 60, 0.4);
+        background: rgba(231, 76, 60, 0.05);
+    }
+
+    .retry-message-btn {
+        background: none;
+        border: none;
+        color: #e74c3c;
+        cursor: pointer;
+        font-size: 0.6rem;
+        margin-top: 2px;
+        text-decoration: underline;
+        font-weight: bold;
+        display: block;
+        text-align: center;
+        width: 100%;
+        padding: 2px 0;
+    }
+
+    .retry-message-btn:hover {
+        color: #c0392b;
     }
 
     .message-wrapper.message-read {
