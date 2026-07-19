@@ -217,22 +217,13 @@
     async function loadAdminSound(type) {
         const soundPaths = {
             'vanish': [
-                '/audio/vanish.mp3', '/audio/vanish.wav',
-                '/audio/notification.mp3', '/audio/notification.wav',
-                '/vanish.mp3', '/vanish.wav',
-                '/sounds/vanish.mp3', '/sounds/vanish.wav'
+                '/audio/vanish.mp3', '/audio/vanish.wav'
             ],
             'send': [
-                '/audio/send.mp3', '/audio/send.wav',
-                '/audio/outgoing.mp3', '/audio/outgoing.wav',
-                '/send.mp3', '/send.wav',
-                '/sounds/send.mp3', '/sounds/send.wav'
+                '/audio/send.mp3', '/audio/send.wav'
             ],
             'receive': [
-                '/audio/receive.mp3', '/audio/receive.wav',
-                '/audio/incoming.mp3', '/audio/incoming.wav',
-                '/receive.mp3', '/receive.wav',
-                '/sounds/receive.mp3', '/sounds/receive.wav'
+                '/audio/receive.mp3', '/audio/receive.wav'
             ]
         };
 
@@ -254,13 +245,13 @@
                     }
                     
                     adminCustomSoundLoaded = true;
-                    console.log('✅ Admin ' + type + ' sound loaded from:', path);
+                    console.log('Admin ' + type + ' sound loaded from:', path);
                     return;
                 }
             } catch (e) {}
         }
         
-        console.log('⚠️ No custom admin ' + type + ' sound found, generating fallback');
+        console.log('No custom admin ' + type + ' sound found, generating fallback');
         generateAdminFallbackSound(type);
     }
 
@@ -313,7 +304,7 @@
                 adminReceiveBuffer = buffer;
             }
             
-            console.log('✅ Admin fallback ' + type + ' sound generated');
+            console.log('Admin fallback ' + type + ' sound generated');
         } catch (e) {}
     }
 
@@ -353,10 +344,10 @@
             gainNode.connect(adminAudioContext.destination);
             
             source.start();
-            console.log('🔊 Admin ' + type + ' sound played');
+            console.log('Admin ' + type + ' sound played');
             
         } catch (e) {
-            console.log('⚠️ Could not play admin ' + type + ' sound:', e);
+            console.log('Could not play admin ' + type + ' sound:', e);
             playAdminHtml5Fallback(type);
         }
     }
@@ -365,19 +356,13 @@
         try {
             const soundPaths = {
                 'vanish': [
-                    '/audio/vanish.mp3', '/audio/vanish.wav',
-                    '/audio/notification.mp3', '/audio/notification.wav',
-                    '/vanish.mp3', '/vanish.wav'
+                    '/audio/vanish.mp3', '/audio/vanish.wav'
                 ],
                 'send': [
-                    '/audio/send.mp3', '/audio/send.wav',
-                    '/audio/outgoing.mp3', '/audio/outgoing.wav',
-                    '/send.mp3', '/send.wav'
+                    '/audio/send.mp3', '/audio/send.wav'
                 ],
                 'receive': [
-                    '/audio/receive.mp3', '/audio/receive.wav',
-                    '/audio/incoming.mp3', '/audio/incoming.wav',
-                    '/receive.mp3', '/receive.wav'
+                    '/audio/receive.mp3', '/audio/receive.wav'
                 ]
             };
             

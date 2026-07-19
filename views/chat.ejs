@@ -1,4 +1,4 @@
-<section class="container chat-container">
+<section class="chat-container">
 
    <div class="container">
     <div class="chat-header-user">
@@ -9,10 +9,10 @@
                     <p class="user-header">
                         <span id="admin-status" class="status-indicator online">● Online</span>
                         <span id="message-expiry" style="font-size: 0.7rem; color: var(--text-muted); margin-left: 10px;">
-                            Messages vanish after being read (longer messages stay longer)
+                            Messages vanish after being read
                         </span>
                     </p>
-                    <button class="send-button" style="color: #ffff;"><a href="auth/logout">leave</a></button>
+                    <button class="send-button" ><a href="auth/logout" style="color: #ffff !important;" >leave</a></button>
                 </div>
             </div>
           
@@ -146,6 +146,9 @@
 <script src="/socket.io/socket.io.js"></script>
 
 <script>
+
+
+
 (function() {
     'use strict';
 
@@ -198,11 +201,11 @@
     function initAudio() {
         try {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            console.log('✅ Audio context created');
+            console.log(' Audio context created');
             loadAllSounds();
             return true;
         } catch (e) {
-            console.log('⚠️ Web Audio API not supported');
+            console.log(' Web Audio API not supported');
             return false;
         }
     }
@@ -220,21 +223,12 @@
         const soundPaths = {
             'vanish': [
                 '/audio/vanish.mp3', '/audio/vanish.wav',
-                '/audio/notification.mp3', '/audio/notification.wav',
-                '/vanish.mp3', '/vanish.wav',
-                '/sounds/vanish.mp3', '/sounds/vanish.wav'
             ],
             'send': [
-                '/audio/send.mp3', '/audio/send.wav',
-                '/audio/outgoing.mp3', '/audio/outgoing.wav',
-                '/send.mp3', '/send.wav',
-                '/sounds/send.mp3', '/sounds/send.wav'
+                '/audio/send.mp3', '/audio/send.wav'
             ],
             'receive': [
-                '/audio/receive.mp3', '/audio/receive.wav',
-                '/audio/incoming.mp3', '/audio/incoming.wav',
-                '/receive.mp3', '/receive.wav',
-                '/sounds/receive.mp3', '/sounds/receive.wav'
+                '/audio/receive.mp3', '/audio/receive.wav'
             ]
         };
 
@@ -256,7 +250,7 @@
                     }
                     
                     customSoundLoaded = true;
-                    console.log('✅ ' + type + ' sound loaded from:', path);
+                    console.log( type + ' sound loaded from:', path);
                     return;
                 }
             } catch (e) {
@@ -265,7 +259,7 @@
         }
         
         // If no custom sound found, generate fallback
-        console.log('⚠️ No custom ' + type + ' sound found, generating fallback');
+        console.log('No custom ' + type + ' sound found, generating fallback');
         generateFallbackSound(type);
     }
 
@@ -323,9 +317,9 @@
                 receiveSoundBuffer = buffer;
             }
             
-            console.log('✅ Fallback ' + type + ' sound generated');
+            console.log('Fallback ' + type + ' sound generated');
         } catch (e) {
-            console.log('⚠️ Could not generate fallback ' + type + ' sound:', e);
+            console.log('Could not generate fallback ' + type + ' sound:', e);
         }
     }
 
@@ -350,7 +344,7 @@
             
             if (audioContext.state === 'suspended') {
                 audioContext.resume().catch(function(e) {
-                    console.log('⚠️ Could not resume audio context:', e);
+                    console.log(' Could not resume audio context:', e);
                     playHtml5AudioFallback(type);
                     return;
                 });
@@ -378,19 +372,13 @@
         try {
             const soundPaths = {
                 'vanish': [
-                    '/audio/vanish.mp3', '/audio/vanish.wav',
-                    '/audio/notification.mp3', '/audio/notification.wav',
-                    '/vanish.mp3', '/vanish.wav'
+                    '/audio/vanish.mp3', '/audio/vanish.wav'
                 ],
                 'send': [
-                    '/audio/send.mp3', '/audio/send.wav',
-                    '/audio/outgoing.mp3', '/audio/outgoing.wav',
-                    '/send.mp3', '/send.wav'
+                    '/audio/send.mp3', '/audio/send.wav'
                 ],
                 'receive': [
-                    '/audio/receive.mp3', '/audio/receive.wav',
-                    '/audio/incoming.mp3', '/audio/incoming.wav',
-                    '/receive.mp3', '/receive.wav'
+                    '/audio/receive.mp3', '/audio/receive.wav'
                 ]
             };
             
@@ -409,7 +397,7 @@
                 } catch (e) {}
             }
         } catch (e) {
-            console.log('⚠️ HTML5 Audio play error:', e);
+            console.log('HTML5 Audio play error:', e);
         }
     }
 
@@ -424,7 +412,7 @@
 
     // ===== SOCKET EVENTS =====
     socket.on('connect', function() {
-        console.log('✅ Connected to chat server');
+        console.log('Connected to chat server');
         socket.emit('set-online-status', 'online');
         adminStatusElement.textContent = '● Online';
         adminStatusElement.className = 'status-indicator online';
@@ -444,7 +432,7 @@
     });
 
     socket.on('new-message', function(message) {
-        console.log('📨 New message received:', message);
+        console.log('New message received:', message);
         // Play receive sound
         playSound('receive');
         handleNewMessage(message);
@@ -461,14 +449,14 @@
     });
 
     socket.on('all-messages-read', function(data) {
-        console.log('📖 Admin marked all messages as read');
+        console.log('Admin marked all messages as read');
         document.querySelectorAll('.message-wrapper:not([data-is-read="true"])').forEach(function(element) {
             markMessageAsRead(element.dataset.messageId);
         });
     });
 
     socket.on('message-read', function(data) {
-        console.log('📖 Message marked as read by admin:', data.messageId);
+        console.log('Message marked as read by admin:', data.messageId);
         const messageElement = document.querySelector('[data-message-id="' + data.messageId + '"]');
         if (messageElement) {
             markMessageAsRead(data.messageId);
@@ -476,12 +464,12 @@
     });
 
     socket.on('message-vanished', function(data) {
-        console.log('💨 Message vanished:', data);
+        console.log('Message vanished:', data);
         vanishMessage(data.messageId);
     });
 
     socket.on('message-deleted', function(data) {
-        console.log('🗑️ Message deleted:', data);
+        console.log('Message deleted:', data);
         vanishMessage(data.messageId);
     });
 

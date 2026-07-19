@@ -974,7 +974,7 @@ a {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 15px;
+    padding: 8px;
     background: linear-gradient(180deg, rgba(26, 26, 26, 0.95) 0%, rgba(10, 10, 10, 0.95) 100%);
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
